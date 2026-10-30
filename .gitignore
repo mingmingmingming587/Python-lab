@@ -218,3 +218,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+# CampusPath local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Local reference material
+/local/
