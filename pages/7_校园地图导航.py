@@ -49,7 +49,18 @@ with controls:
         statuses = state.get("place_status", {})
         if start_name and goal_name:
             st.caption(f"起点：{statuses.get(start_name, '图面近似')}；终点：{statuses.get(goal_name, '图面近似')}。")
-        st.caption("北侧限时门：" + ("已设为开放" if state["north_gate_open"] else "已设为关闭") + "（非实时状态，可在地图维护中调整）")
+        with st.expander("天桥下校门状态", expanded=True):
+            st.caption("南侧门在模型中始终开放；北侧限时门需手动设置，不代表实时门禁状态。")
+            opened = st.checkbox("北侧限时门开放", value=state["north_gate_open"])
+            if opened != state["north_gate_open"]:
+                state["north_gate_open"] = opened
+                try:
+                    service.save(state, revision)
+                    st.session_state.pop("campus_route", None)
+                    st.rerun()
+                except ValueError as error:
+                    st.error(str(error))
+                    st.stop()
         start = tuple(state["places"][start_name]) if start_name else None
         goal = tuple(state["places"][goal_name]) if goal_name else None
         signature = (revision, start_name, goal_name)

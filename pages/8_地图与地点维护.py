@@ -66,8 +66,14 @@ with controls:
 
         with st.expander("地点维护：添加、修改或删除"):
             st.caption("从参考图自动生成的地点是附近道路位置；只有核实真实入口后，才应设为“用户已核实入口”。")
-            options = ["新增地点", *state["places"]]
-            selected = st.selectbox("选择要维护的地点", options)
+            keyword = st.text_input("搜索已有地点", placeholder="输入建筑名称，例如图书馆")
+            matching = [name for name in state["places"] if keyword.strip().casefold() in name.casefold()]
+            if keyword.strip() and not matching:
+                st.info("没有找到匹配的地点；可以更换关键词，或选择新增地点。")
+            options = ["新增地点", *matching]
+            selected = st.selectbox("选择要维护的地点", options,
+                                    index=1 if keyword.strip() and matching else 0,
+                                    help="输入关键词后，从匹配结果中选择已有地点。")
             old = state["places"].get(selected, [0, 0, 0])
             old_status = state.get("place_status", {}).get(selected, "图面近似")
             with st.form("campus_place_edit"):

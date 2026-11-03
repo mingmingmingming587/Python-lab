@@ -63,6 +63,12 @@ class LayeredCampusTests(unittest.TestCase):
             north_gate = next(p for p in state["portals"] if p[4] == "北侧限时门")
             gate_pair = ((north_gate[0], north_gate[2], north_gate[3]), (north_gate[1], north_gate[2], north_gate[3]))
             self.assertNotIn(gate_pair, active_portals(state))
+            south_gate = next(p for p in state["portals"] if p[4] == "南侧门")
+            south_pair = ((south_gate[0], south_gate[2], south_gate[3]), (south_gate[1], south_gate[2], south_gate[3]))
+            self.assertIn(south_pair, active_portals(state))
+            legacy_state = dict(state)
+            legacy_state["south_gate_open"] = False
+            self.assertIn(south_pair, active_portals(legacy_state))
             self.assertFalse(layered_astar(state["grids"], *gate_pair, []).found)
             # 天桥与海油大街在图面交叉，也没有从桥直接切换到地面的连接。
             crossing = (north_gate[2], north_gate[3])

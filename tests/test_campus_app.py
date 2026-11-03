@@ -20,6 +20,29 @@ def source_for(layout, page="7_校园地图导航.py"):
 
 
 class CampusAppTests(unittest.TestCase):
+    def test_search_places_and_change_gate_states(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            db, layout = tmp_path / "campus.db", tmp_path / "layout.json"
+            layout.write_text(json.dumps(layout_fixture(), ensure_ascii=False), encoding="utf-8")
+            with patch("database.campus_project.CampusMapService", side_effect=lambda data: CampusMapService(data, db)):
+                maintenance = AppTest.from_string(source_for(layout, "8_地图与地点维护.py"), default_timeout=40).run()
+                next(t for t in maintenance.text_input if t.label == "搜索已有地点").set_value("北区").run()
+                choice = next(s for s in maintenance.selectbox if s.label == "选择要维护的地点")
+                self.assertEqual(choice.options, ["新增地点", "北区路线"])
+                self.assertEqual(choice.value, "北区路线")
+                next(t for t in maintenance.text_input if t.label == "搜索已有地点").set_value("不存在").run()
+                self.assertTrue(any("没有找到匹配的地点" in i.value for i in maintenance.info))
+
+                nav = AppTest.from_string(source_for(layout), default_timeout=40).run()
+                next(c for c in nav.checkbox if c.label == "北侧限时门开放").check().run()
+                self.assertTrue(load_campus(db)[1]["north_gate_open"])
+                self.assertFalse(any("南侧门" in c.label for c in nav.checkbox))
+                refreshed = AppTest.from_string(source_for(layout, "8_地图与地点维护.py"), default_timeout=40).run()
+                self.assertTrue(next(c for c in refreshed.checkbox if "北侧限时门" in c.label).value)
+                self.assertFalse(any("南侧门" in c.label for c in refreshed.checkbox))
+                self.assertFalse(nav.exception)
+
     def test_cannot_block_a_saved_place(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
