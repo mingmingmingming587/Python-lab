@@ -1,8 +1,8 @@
 import streamlit as st
 from database.store import init_database, list_routes
 
-st.title("历史路线")
-st.caption("时间为 UTC；记录保存了查询时的网格和路线快照。")
+st.title("模拟路线历史")
+st.caption("本页显示模拟地图的历史。校园示意地图的历史及图形回放在“校园地图导航”页面底部。时间为 UTC。")
 init_database()
 records = list_routes()
 if not records:

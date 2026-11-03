@@ -8,9 +8,10 @@ from algorithms.astar import astar_search
 from database.survey import (COLS, ROWS, STATUSES, delete_survey, image_position,
                              init_survey, list_survey, save_survey, verified_grid)
 from visualization.campus_diagram import build_campus_diagram
+from visualization.user_markings import add_markings, blocked_grid_cells, candidate_records
 
-st.set_page_config(page_title="校园道路采集", layout="wide")
-st.title("校园道路采集与 A* 试算")
+st.title("道路信息核查")
+st.info("此处记录道路和入口的来源及核实状态；记录不会自动修改导航地图。核实后请到“地图与地点维护”更新通行网格和地点。")
 st.warning("这是采集和校对工具，网格位置是参考图面坐标，不是经纬度。资料未完整核实，试算结果不能用于实际导航。")
 st.caption("按图上行列录入水平或垂直路段；拐弯拆成多段。道路与入口需分别记录来源和核实状态。")
 
@@ -28,6 +29,21 @@ except (OSError, ValueError, KeyError, TypeError) as error:
     st.stop()
 
 st.subheader("参考道路线索")
+st.caption("用户标注的三条主路和天桥两侧门可以作为待校对记录导入；图面坐标由手绘截图近似换算，尚不能直接用于 A*。")
+if st.button("导入用户标注的主路和校门线索"):
+    source = "用户标注图及说明（图面坐标近似，待校对）"
+    existing = {(item["name"], item["source"]) for item in records}
+    added = 0
+    try:
+        for kind, name, start, end in candidate_records():
+            if (name, source) not in existing:
+                save_survey(kind, name, start, end, "待核实", source,
+                            "天桥跨层关系不能由当前单层网格表达" if "天桥" in name else "线形和校门连接待核对")
+                added += 1
+        st.success(f"已加入 {added} 条待校对线索，原有记录未被覆盖。")
+        records = list_survey()
+    except ValueError as error:
+        st.error(str(error))
 st.caption("可以把根据校园参考图粗画的道路示意线加入清单。它们仅供对照，位置、校内外归属和通行状态均待核实，不会自动成为可通行道路。已保存的记录不会随底图更新，请逐条检查和修改。")
 if st.button("加入已有道路示意线索"):
     # 与已有示意图中的近似线一致，只作为待核实的起点。
@@ -88,30 +104,33 @@ if records:
                    "起点(行,列)": f"({r['row1']}, {r['col1']})", "终点(行,列)": f"({r['row2']}, {r['col2']})",
                    "状态": r["status"], "来源": r["source"], "备注": r["note"]} for r in records], hide_index=True)
 
-st.subheader("A* 网格试算")
-st.caption("只有标为已核实可通行的道路进入 A*；未知和不可通行均不通行。如记录冲突，不可通行优先。入口本身不会自动打通道路。")
-grid = verified_grid(records)
-entrances = [r for r in records if r["kind"] == "入口" and r["status"] == "已核实可通行" and grid[r["row1"]][r["col1"]] == 0]
-path = []
-if entrances:
-    names = {r["id"]: f"{r['name']} (#{r['id']})" for r in entrances}
-    a, b = st.columns(2)
-    start_id = a.selectbox("起点入口", list(names), format_func=names.get)
-    goal_id = b.selectbox("终点入口", list(names), index=min(1, len(names) - 1), format_func=names.get)
-    if st.button("试算 A* 路线"):
-        start, goal = by_id[start_id], by_id[goal_id]
-        result = astar_search(grid, (start["row1"], start["col1"]), (goal["row1"], goal["col1"]))
-        if result.found:
-            path = result.path
-            st.success(f"已找到网格路线：{result.path_length} 步；扩展 {result.expanded_count} 个节点。步数不等于实际距离。")
-        else:
-            st.warning("当前已核实道路未连通；请检查道路、入口或待核实路段。")
-else:
-    st.info("请先录入位于已核实道路上的已核实入口，才能试算。")
+with st.expander("采集网格试算（独立于校园导航）"):
+    st.caption("本页只有标为已核实可通行的道路进入 A*；未知区域、用户红线和天桥北侧限时门默认不通行。用户标注的绿色线尚未自动导入本页网格。")
+    st.warning("本页是单层采集网格，不能确保进出校园的路径经过校门，也不能区分天桥上下交叉。多层实验请使用“校园地图导航”；两者结果都不能用于实际导航。")
+    grid = verified_grid(records, blocked_cells=blocked_grid_cells())
+    entrances = [r for r in records if r["kind"] == "入口" and r["status"] == "已核实可通行" and grid[r["row1"]][r["col1"]] == 0]
+    path = []
+    if entrances:
+        names = {r["id"]: f"{r['name']} (#{r['id']})" for r in entrances}
+        a, b = st.columns(2)
+        start_id = a.selectbox("起点入口", list(names), format_func=names.get)
+        goal_id = b.selectbox("终点入口", list(names), index=min(1, len(names) - 1), format_func=names.get)
+        if st.button("试算 A* 路线"):
+            start, goal = by_id[start_id], by_id[goal_id]
+            result = astar_search(grid, (start["row1"], start["col1"]), (goal["row1"], goal["col1"]))
+            if result.found:
+                path = result.path
+                st.success(f"已找到网格路线：{result.path_length} 步；扩展 {result.expanded_count} 个节点。步数不等于实际距离。")
+            else:
+                st.warning("当前已核实道路未连通；请检查道路、入口或待核实路段。")
+    else:
+        st.info("请先录入位于已核实道路上的已核实入口，才能试算。")
+
 
 st.subheader("校园图面与采集网格")
 st.caption("横轴是列，纵轴是行。橙色：待核实；绿色：已核实可通行；红色：已核实不可通行；蓝色：本次试算路线。网格相邻不代表现实中一定相通。")
 fig = build_campus_diagram(places, footprints=layout.get("footprints"))
+add_markings(fig)
 for record in records:
     x1, y1 = image_position(record["row1"], record["col1"])
     x2, y2 = image_position(record["row2"], record["col2"])

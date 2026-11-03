@@ -3,8 +3,8 @@ import hashlib
 import json
 from database.store import init_database, load_map, add_place, update_place, delete_place, replace_map
 
-st.title("校园地图管理")
-st.caption("初始地图是模拟数据；导入数据的道路、入口和使用权限需要自行核实。网格编辑请在智能导航页面进行。")
+st.title("模拟地图管理")
+st.caption("初始地图是模拟数据；导入数据的道路、入口和使用权限需要自行核实。网格编辑请在模拟地图导航页面进行。")
 init_database()
 data = load_map()
 grid, places = data["grid"], data["places"]

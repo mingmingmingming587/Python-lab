@@ -53,11 +53,11 @@ def build_campus_diagram(places, focus=None, footprints=None, show_labels=True):
     ]
     for name, points in roads:
         fig.add_trace(go.Scatter(x=[point[0] for point in points], y=[point[1] for point in points],
-                                 mode="lines", name=name, line=dict(color="#d89020", width=2, dash="dot"),
-                                 hovertemplate=f"{name}（位置示意、通行待核实）<extra></extra>", showlegend=False))
+                                 mode="lines", name=name, line=dict(color="#218850", width=3),
+                                 hovertemplate=f"{name}（用户确认可走，图面走向待校对）<extra></extra>", showlegend=False))
         midpoint = ((points[0][0] + points[-1][0]) / 2, (points[0][1] + points[-1][1]) / 2)
         fig.add_annotation(x=midpoint[0], y=midpoint[1], text=name, showarrow=False,
-                           font=dict(color="#7a4b00", size=9), bgcolor="rgba(255,255,255,0.8)")
+                           font=dict(color="#136936", size=9), bgcolor="rgba(255,255,255,0.8)")
 
     if focus is None:
         x_range, y_range = [86, 502], [780, 24]

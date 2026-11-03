@@ -13,7 +13,7 @@
 - A* 与测试：`feature/path-planning`，主要在 `algorithms/` 和 `tests/` 工作。
 - 导航与可视化：`feature/navigation-ui`，主要在 `pages/` 和 `visualization/` 工作。
 - 共同开发基线为 `main`。修改公共数据格式或接口前先查看 `docs/collaboration.md`，并在变更时同步更新说明。
-- 网格使用 `0` 表示可通行、`1` 表示障碍物；坐标为 `(row, col)`。地图、算法和页面应使用一致的数据。
+- 网格使用 `0` 表示可通行、`1` 表示障碍物。模拟地图坐标为 `(row, col)`；校园实验由校内、校外道路和天桥三张二维网格构成，坐标为 `(layer, row, col)`，仅在指定入口换层。地图、算法和页面应使用一致的数据。
 
 ## 开发约束
 

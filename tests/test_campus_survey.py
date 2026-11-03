@@ -4,9 +4,25 @@ from pathlib import Path
 
 from algorithms.astar import astar_search
 from database.survey import delete_survey, init_survey, list_survey, save_survey, verified_grid
+from visualization.user_markings import blocked_grid_cells, image_point, add_markings
+from visualization.campus_diagram import build_campus_diagram
 
 
 class CampusSurveyTests(unittest.TestCase):
+    def test_user_fences_override_roads_and_bridge_is_only_visual(self):
+        blocked = blocked_grid_cells()
+        self.assertTrue(blocked)
+        row, col = next(iter(blocked))
+        record = {"kind": "道路", "status": "已核实可通行", "row1": row, "col1": col, "row2": row, "col2": col}
+        self.assertEqual(verified_grid([record])[row][col], 0)
+        self.assertEqual(verified_grid([record], blocked)[row][col], 1)
+        # 用户标注的绿线和天桥不会在没有已核实记录时打开任何网格。
+        self.assertTrue(all(cell == 1 for line in verified_grid([], blocked) for cell in line))
+        fig = add_markings(build_campus_diagram([]))
+        self.assertTrue(any(trace.name == "天桥 · 行人跨街" for trace in fig.data))
+        self.assertTrue(any("非全天开放" in trace.name for trace in fig.data))
+        self.assertAlmostEqual(image_point((92, 156))[0], 86)
+
     def test_persistence_and_safe_astar_grid(self):
         with tempfile.TemporaryDirectory() as tmp:
             db = Path(tmp) / "survey.db"

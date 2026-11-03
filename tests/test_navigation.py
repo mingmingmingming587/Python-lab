@@ -7,6 +7,8 @@ from unittest.mock import patch
 
 from streamlit.testing.v1 import AppTest
 import database.store as store
+from database.campus_project import CampusMapService
+from tests.test_campus_project import layout_fixture
 
 
 class NavigationTests(unittest.TestCase):
@@ -21,6 +23,30 @@ class NavigationTests(unittest.TestCase):
 
     def click(self, app, label):
         return next(button for button in app.button if button.label == label).click().run()
+
+    def test_product_navigation(self):
+        root = Path(__file__).resolve().parents[1]
+        layout = self.db.parent / "layout.json"
+        layout.write_text(json.dumps(layout_fixture(), ensure_ascii=False), encoding="utf-8")
+        exists, read_text = Path.exists, Path.read_text
+        def test_exists(path):
+            return True if path.name == "campus-layout.json" else exists(path)
+        def test_read(path, *args, **kwargs):
+            return read_text(layout, *args, **kwargs) if path.name == "campus-layout.json" else read_text(path, *args, **kwargs)
+        with patch.object(Path, "exists", test_exists), patch.object(Path, "read_text", test_read), patch(
+            "database.campus_project.CampusMapService", side_effect=lambda data: CampusMapService(data, self.db)
+        ):
+            app = AppTest.from_file(str(root / "app.py"), default_timeout=30).run()
+            self.assertFalse(app.exception)
+            self.assertIn("校园地图导航", [title.value for title in app.title])
+            self.assertTrue(any(button.label == "开始 A* 搜索" for button in app.button))
+            app.switch_page("pages/8_地图与地点维护.py").run()
+            self.assertFalse(app.exception)
+            self.assertIn("地图与地点维护", [title.value for title in app.title])
+            self.assertTrue(any(button.label == "保存网格修改" for button in app.button))
+            app.switch_page("pages/9_路线记录.py").run()
+            self.assertFalse(app.exception)
+            self.assertIn("路线记录", [title.value for title in app.title])
 
     def test_place_management_and_history_page(self):
         root = Path(__file__).resolve().parents[1]

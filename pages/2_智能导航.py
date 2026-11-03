@@ -3,7 +3,7 @@ import plotly.graph_objects as go
 from algorithms.astar import astar_search
 from database.store import init_database, load_map, save_grid, save_route
 
-st.title("智能导航")
+st.title("模拟地图导航")
 st.caption("当前地图的道路和入口需要核实；结果仅代表录入网格，不保证现实通行。")
 
 init_database()

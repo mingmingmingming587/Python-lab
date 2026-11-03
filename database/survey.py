@@ -64,14 +64,17 @@ def cells(record):
     return [(row, c1) for row in range(min(r1, r2), max(r1, r2) + 1)]
 
 
-def verified_grid(records):
-    """未知默认为不可通行；已核实不可通行覆盖已核实道路。"""
+def verified_grid(records, blocked_cells=()):
+    """未知默认为不可通行；禁行记录和额外禁行格覆盖已核实道路。"""
     grid = [[1] * COLS for _ in range(ROWS)]
     for status, value in (("已核实可通行", 0), ("已核实不可通行", 1)):
         for record in records:
             if record["kind"] == "道路" and record["status"] == status:
                 for row, col in cells(record):
                     grid[row][col] = value
+    for row, col in blocked_cells:
+        if 0 <= row < ROWS and 0 <= col < COLS:
+            grid[row][col] = 1
     return grid
 
 
