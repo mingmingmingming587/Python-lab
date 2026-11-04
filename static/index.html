@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>校园地图 · A* 最短路径</title>
+    <link rel="stylesheet" href="/static/style.css?v=5" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">CP</div>
+        <div>
+          <h1>校园地图</h1>
+          <p>180 × 90 单层网格 · A* 最短路径</p>
+        </div>
+      </div>
+      <div class="top-stats" id="topStats"></div>
+      <div class="top-actions">
+        <span class="save-state" id="saveState">已加载</span>
+        <button class="btn btn-ghost" id="saveBtn">保存地图</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="map-panel">
+        <div class="map-toolbar">
+          <div class="mode-group" id="modeGroup">
+            <button class="mode active" data-mode="view">查看</button>
+            <button class="mode" data-mode="start">设起点</button>
+            <button class="mode" data-mode="end">设终点</button>
+            <button class="mode" data-mode="walk">画可走</button>
+            <button class="mode" data-mode="block">画障碍</button>
+            <button class="mode" data-mode="place">加点</button>
+          </div>
+          <div class="toolbar-right">
+            <label class="compact">笔刷
+              <select id="brush">
+                <option value="1">1×1</option>
+                <option value="3">3×3</option>
+                <option value="5">5×5</option>
+              </select>
+            </label>
+            <label class="check"><input type="checkbox" id="showGrid" checked />网格</label>
+            <label class="check"><input type="checkbox" id="showLabels" />名称</label>
+            <label class="check"><input type="checkbox" id="showWalk" checked />通行层</label>
+            <button class="btn btn-small" id="undoBtn">撤销</button>
+            <button class="btn btn-small" id="fitBtn">适应高度</button>
+            <button class="btn btn-small" id="fullBtn">100%</button>
+          </div>
+        </div>
+
+        <div class="map-scroll" id="mapScroll">
+          <div class="canvas-wrap" id="canvasWrap">
+            <canvas id="map" width="900" height="1800"></canvas>
+            <div class="tooltip" id="tooltip" hidden></div>
+          </div>
+        </div>
+
+        <div class="map-footer">
+          <span id="cursorInfo">行 -, 列 -</span>
+          <span class="hint" id="modeHint">点击建筑圆点选择地点；滚轮可滚动地图</span>
+        </div>
+      </section>
+
+      <aside class="sidebar">
+        <nav class="tabs" id="tabs">
+          <button class="tab active" data-tab="route">路线</button>
+          <button class="tab" data-tab="places">地点</button>
+          <button class="tab" data-tab="history">历史</button>
+          <button class="tab" data-tab="manage">地图</button>
+        </nav>
+
+        <section class="tab-panel active" id="tab-route">
+          <div class="endpoint-stack">
+            <div class="endpoint-card start">
+              <div class="endpoint-head">
+                <span class="dot"></span>
+                <span>起点</span>
+                <span class="coord" id="startCoord">未选择</span>
+              </div>
+              <strong id="startName">从地图或列表选择起点</strong>
+              <select id="startSelect"><option value="">选择地点…</option></select>
+            </div>
+            <div class="endpoint-card end">
+              <div class="endpoint-head">
+                <span class="dot"></span>
+                <span>终点</span>
+                <span class="coord" id="endCoord">未选择</span>
+              </div>
+              <strong id="endName">从地图或列表选择终点</strong>
+              <select id="endSelect"><option value="">选择地点…</option></select>
+            </div>
+            <button class="btn btn-soft swap" id="swapBtn">交换起点与终点</button>
+          </div>
+
+          <button class="btn btn-primary route-btn" id="routeBtn">开始 A* 查询</button>
+
+          <div class="empty" id="routeEmpty">
+            <div class="empty-mark">A*</div>
+            <p>四方向移动，每步 1；曼哈顿距离启发。</p>
+            <p class="muted">选好起终点后，路线会直接画在地图上。</p>
+          </div>
+
+          <div class="result-card" id="resultCard" hidden>
+            <div class="result-head">
+              <span class="result-kicker" id="resultKicker">查询结果</span>
+              <span class="badge" id="resultBadge"></span>
+            </div>
+            <h2 id="resultTitle">—</h2>
+            <p class="result-message" id="resultMessage"></p>
+            <div class="metrics">
+              <div><span>路径长度</span><strong id="metricCost">—</strong></div>
+              <div><span>扩展节点</span><strong id="metricExpanded">—</strong></div>
+              <div><span>耗时</span><strong id="metricTime">—</strong></div>
+            </div>
+            <div class="search-trace">
+              <div class="trace-head">
+                <span>搜索过程</span>
+                <button class="btn btn-small" id="playBtn">播放</button>
+              </div>
+              <input type="range" id="traceSlider" min="0" max="0" value="0" />
+              <div class="trace-label">
+                <span id="traceInfo">扩展 0 / 0</span>
+                <span class="muted">橙色为已扩展节点</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="tab-panel" id="tab-places">
+          <div class="section-head">
+            <div>
+              <h2>地点</h2>
+              <p class="muted" id="placeCount">—</p>
+            </div>
+            <button class="btn btn-small" id="newPlaceBtn">新增</button>
+          </div>
+          <input class="search" id="placeSearch" placeholder="搜索建筑、食堂、校门…" />
+          <div class="place-list" id="placeList"></div>
+
+          <form class="place-form" id="placeForm">
+            <div class="section-head">
+              <h3 id="placeFormTitle">新增地点</h3>
+              <button type="button" class="btn btn-small" id="pickPlaceBtn">地图选点</button>
+            </div>
+            <input type="hidden" id="placeId" />
+            <label>名称<input id="placeName" required maxlength="40" /></label>
+            <label>类型
+              <select id="placeType">
+                <option value="building">建筑</option>
+                <option value="dorm">宿舍</option>
+                <option value="sports">运动场</option>
+                <option value="gate">校门</option>
+                <option value="park">园区</option>
+                <option value="water">水域</option>
+                <option value="landmark">广场/地标</option>
+              </select>
+            </label>
+            <div class="form-row">
+              <label>标记行<input id="placeRow" type="number" min="0" max="179" required /></label>
+              <label>标记列<input id="placeCol" type="number" min="0" max="89" required /></label>
+            </div>
+            <div class="form-row">
+              <label>入口行<input id="accessRow" type="number" min="0" max="179" placeholder="留空自动吸附" /></label>
+              <label>入口列<input id="accessCol" type="number" min="0" max="89" placeholder="留空自动吸附" /></label>
+            </div>
+            <label>别名<input id="placeAliases" placeholder="用逗号分隔，可留空" /></label>
+            <div class="form-actions">
+              <button class="btn btn-primary" type="submit">保存地点</button>
+              <button class="btn btn-soft" type="button" id="cancelPlace">取消</button>
+              <button class="btn btn-danger" type="button" id="deletePlace" hidden>删除</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="tab-panel" id="tab-history">
+          <div class="section-head">
+            <div>
+              <h2>查询记录</h2>
+              <p class="muted">自动保存最近 100 次查询</p>
+            </div>
+            <button class="btn btn-small" id="clearHistory">清空</button>
+          </div>
+          <div class="history-list" id="historyList"></div>
+        </section>
+
+        <section class="tab-panel" id="tab-manage">
+          <div class="section-head">
+            <div>
+              <h2>地图维护</h2>
+              <p class="muted" id="mapUpdated">—</p>
+            </div>
+          </div>
+          <div class="stat-grid" id="manageStats"></div>
+          <div class="manage-actions">
+            <button class="btn btn-primary" id="saveMapBtn">保存到 SQLite</button>
+            <button class="btn btn-soft" id="resetMapBtn">恢复基准地图</button>
+            <button class="btn btn-soft" id="exportBtn">导出 JSON</button>
+            <label class="btn btn-soft file-btn">导入 JSON<input type="file" id="importFile" accept="application/json,.json" /></label>
+          </div>
+          <div class="legend">
+            <h3>图例</h3>
+            <div><span class="legend-dot building"></span>建筑点</div>
+            <div><span class="legend-dot dorm"></span>宿舍点</div>
+            <div><span class="legend-dot sports"></span>运动场点</div>
+            <div><span class="legend-dot gate"></span>校门点</div>
+            <div><span class="legend-line path"></span>A* 路径</div>
+            <div><span class="legend-line expanded"></span>扩展节点</div>
+          </div>
+          <div class="notice">
+            <strong>数据约定</strong>
+            <p>0 = 可走，1 = 不可走。黄色建筑、红色边界和未涂色区域都按 1 处理；本图不含天桥二层结构。</p>
+          </div>
+        </section>
+      </aside>
+    </main>
+
+    <div class="toast" id="toast" hidden></div>
+    <script src="/static/app.js?v=5"></script>
+  </body>
+</html>
