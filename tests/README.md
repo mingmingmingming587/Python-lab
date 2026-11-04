@@ -1,11 +1,16 @@
-# 测试
+# 检查
 
 在仓库根目录运行：
 
 ```powershell
-python -m unittest discover -s tests -p 'test_*.py' -v
+.\.venv\Scripts\python.exe -m unittest discover -s tests -p 'test_*.py' -q
 ```
 
-测试覆盖单层 A* 与 BFS 对照、分层 A* 与跨层连接、地图与历史持久化、道路采集、页面交互，以及地图资料读取。测试使用临时数据库或合成数据，不修改本机校园数据库，也不需要提交原参考图。
+- `test_layered_astar.py`：与独立 BFS 比较最短步数、非法端点、不可达和跨层隔离。
+- `test_pdf_map.py`：PDF 分类数量及道路逐格交叉校验、连通性、地图快照、来源变更保护、建筑内部标记。读取原 PDF 的检查在缺少参考文件时跳过。
+- `test_campus_app.py`：按网格查询、编辑后重算、历史回放、版本冲突、建筑标记保存。
+- `test_navigation.py`：产品页面切换及操作台宽度设置保留。
 
-自动测试验证程序和模型规则，不能验证校园现场道路、入口、门禁或图面坐标准确性。
+测试使用临时数据库，不修改本机地图。旧模拟系统专用测试随对应脚手架移除。
+
+`test_place_navigation.py` 检查名称查询、临时接入点、多入口选择、关闭入口不回退以及场地标记不改变通行。

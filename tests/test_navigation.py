@@ -1,146 +1,32 @@
 import unittest
-import json
-from functools import partial
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from streamlit.testing.v1 import AppTest
-import database.store as store
 from database.campus_project import CampusMapService
-from tests.test_campus_project import layout_fixture
+from database.pdf_map import initial_pdf_state
+from tests.test_pdf_map import pdf_fixture
 
 
 class NavigationTests(unittest.TestCase):
-    def setUp(self):
-        temporary = self.enterContext(TemporaryDirectory())
-        self.db = Path(temporary) / "test.db"
-        self.list_routes = partial(store.list_routes, db_path=self.db)
-        self.load_map = partial(store.load_map, db_path=self.db)
-        for name in ("init_database", "load_map", "save_grid", "save_route", "add_place", "update_place", "delete_place", "list_routes", "replace_map"):
-            original = getattr(store, name)
-            self.enterContext(patch.object(store, name, partial(original, db_path=self.db)))
-
-    def click(self, app, label):
-        return next(button for button in app.button if button.label == label).click().run()
-
     def test_product_navigation(self):
         root = Path(__file__).resolve().parents[1]
-        layout = self.db.parent / "layout.json"
-        layout.write_text(json.dumps(layout_fixture(), ensure_ascii=False), encoding="utf-8")
-        exists, read_text = Path.exists, Path.read_text
-        def test_exists(path):
-            return True if path.name == "campus-layout.json" else exists(path)
-        def test_read(path, *args, **kwargs):
-            return read_text(layout, *args, **kwargs) if path.name == "campus-layout.json" else read_text(path, *args, **kwargs)
-        with patch.object(Path, "exists", test_exists), patch.object(Path, "read_text", test_read), patch(
-            "database.campus_project.CampusMapService", side_effect=lambda data: CampusMapService(data, self.db)
-        ):
+        temporary = self.enterContext(TemporaryDirectory())
+        db = Path(temporary) / "pdf.db"
+        layout = pdf_fixture()
+        service = CampusMapService(initial_pdf_state(layout), db)
+        with patch("database.pdf_map.open_pdf_project", side_effect=lambda: (layout, service, *service.load())):
             app = AppTest.from_file(str(root / "app.py"), default_timeout=30).run()
             self.assertFalse(app.exception)
             self.assertIn("校园地图导航", [title.value for title in app.title])
-            self.assertTrue(any(button.label == "开始 A* 搜索" for button in app.button))
             width = next(slider for slider in app.slider if slider.label == "左侧宽度（%）")
             self.assertEqual((width.min, width.max, width.value), (25, 33, 25))
             width.set_value(33).run()
+            app.switch_page("pages/map_management.py").run()
             self.assertFalse(app.exception)
-            app.switch_page("pages/8_地图与地点维护.py").run()
-            self.assertFalse(app.exception)
-            self.assertIn("地图与地点维护", [title.value for title in app.title])
             self.assertEqual(app.session_state["control_width"], 33)
             self.assertTrue(any(button.label == "保存网格修改" for button in app.button))
-            app.switch_page("pages/9_路线记录.py").run()
+            app.switch_page("pages/route_history.py").run()
             self.assertFalse(app.exception)
             self.assertIn("路线记录", [title.value for title in app.title])
-
-    def test_place_management_and_history_page(self):
-        root = Path(__file__).resolve().parents[1]
-        management = AppTest.from_file(str(root / "pages" / "1_地图管理.py"), default_timeout=15).run()
-        management.text_input[0].input("模拟新入口")
-        management.number_input[0].set_value(1)
-        management.number_input[1].set_value(2)
-        self.click(management, "添加")
-        self.assertIn("模拟新入口", self.load_map()["places"])
-        management.selectbox[0].select("模拟新入口").run()
-        management.checkbox[0].check().run()
-        self.click(management, "删除地点")
-        self.assertNotIn("模拟新入口", self.load_map()["places"])
-        self.assertFalse(management.exception)
-
-        navigation = AppTest.from_file(str(root / "pages" / "2_智能导航.py"), default_timeout=15).run()
-        self.click(navigation, "开始 A* 搜索")
-        history = AppTest.from_file(str(root / "pages" / "4_历史记录.py"), default_timeout=15).run()
-        self.assertEqual(len(history.expander), 1)
-        self.assertIn("模拟教学楼入口", history.expander[0].label)
-        self.assertFalse(history.exception)
-
-    def test_map_save_reload_and_history_snapshot(self):
-        page = Path(__file__).resolve().parents[1] / "pages" / "2_智能导航.py"
-        app = AppTest.from_file(str(page), default_timeout=15).run()
-        self.click(app, "设置为障碍物")
-        self.click(app, "开始 A* 搜索")
-        self.assertFalse(self.list_routes()[0]["found"])
-        self.assertEqual(self.list_routes()[0]["grid_snapshot"][3][4], 1)
-        self.click(app, "保存地图")
-        self.assertEqual(self.load_map()["grid"][3][4], 1)
-        restarted = AppTest.from_file(str(page), default_timeout=15).run()
-        self.assertEqual(restarted.session_state["grid"][3][4], 1)
-        self.assertEqual(self.list_routes()[0]["grid_snapshot"][3][4], 1)
-        self.assertFalse(restarted.exception)
-
-    def test_search_replay_and_reset(self):
-        page = Path(__file__).resolve().parents[1] / "pages" / "2_智能导航.py"
-        app = AppTest.from_file(str(page), default_timeout=15).run()
-        self.click(app, "开始 A* 搜索")
-        self.assertEqual(len(self.list_routes()), 1)
-        total = int(app.slider[0].max)
-        self.assertEqual(app.slider[0].value, total)
-
-        app.slider[0].set_value(0).run()
-        self.assertEqual(len(self.list_routes()), 1)
-        traces = json.loads(app.get("plotly_chart")[0].proto.spec)["data"]
-        self.assertNotIn("已扩展节点", [t.get("name") for t in traces])
-        self.assertNotIn("A* 路径", [t.get("name") for t in traces])
-
-        app.slider[0].set_value(1).run()
-        traces = json.loads(app.get("plotly_chart")[0].proto.spec)["data"]
-        visited = next(t for t in traces if t.get("name") == "已扩展节点")
-        self.assertEqual(len(visited["x"]), 1)
-        self.assertNotIn("A* 路径", [t.get("name") for t in traces])
-
-        app.slider[0].set_value(total).run()
-        traces = json.loads(app.get("plotly_chart")[0].proto.spec)["data"]
-        self.assertIn("A* 路径", [t.get("name") for t in traces])
-
-        app.slider[0].set_value(0).run()
-        self.click(app, "开始 A* 搜索")
-        self.assertEqual(app.slider[0].value, total)
-        self.click(app, "设置为障碍物")
-        self.assertEqual(len(app.slider), 0)
-        self.click(app, "开始 A* 搜索")
-        self.assertTrue(any("没有可行路线" in item.value for item in app.warning))
-        self.assertGreater(app.slider[0].value, 0)
-        self.assertFalse(app.exception)
-
-    def test_search_edit_and_same_point(self):
-        page = Path(__file__).resolve().parents[1] / "pages" / "2_智能导航.py"
-        app = AppTest.from_file(str(page), default_timeout=15).run()
-        self.assertFalse(app.exception)
-        self.click(app, "开始 A* 搜索")
-        self.assertFalse(app.exception)
-        self.assertTrue(any("已找到" in item.value for item in app.success))
-
-        # 默认选择 (3, 4)，它连接模拟地图的左右两侧。
-        self.click(app, "设置为障碍物")
-        self.assertFalse(any("已找到" in item.value for item in app.success))
-        self.click(app, "开始 A* 搜索")
-        self.assertTrue(any("没有可行路线" in item.value for item in app.warning))
-
-        app.selectbox[1].select("模拟教学楼入口").run()
-        self.click(app, "开始 A* 搜索")
-        self.assertTrue(any(item.value == "0 步" for item in app.metric))
-        self.assertFalse(app.exception)
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -1,121 +1,114 @@
-import json
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from streamlit.testing.v1 import AppTest
-
-from database.campus_project import CampusMapService, campus_history, load_campus
-from tests.test_campus_project import layout_fixture
-from visualization.user_markings import blocked_grid_cells
-
-
-def source_for(layout, page="7_校园地图导航.py"):
-    source = (Path("pages") / page).read_text(encoding="utf-8")
-    original = 'layout_path = Path(__file__).resolve().parents[1] / "reference" / "campus-layout.json"'
-    if original not in source:
-        raise AssertionError("校园导航页面的布局路径已改变，请更新测试")
-    return source.replace(original, f"layout_path = Path({str(layout)!r})")
+from database.campus_project import CampusMapService
+from database.pdf_map import initial_pdf_state
+from tests.test_pdf_map import pdf_fixture
 
 
 class CampusAppTests(unittest.TestCase):
-    def test_search_places_and_change_gate_states(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            db, layout = tmp_path / "campus.db", tmp_path / "layout.json"
-            layout.write_text(json.dumps(layout_fixture(), ensure_ascii=False), encoding="utf-8")
-            with patch("database.campus_project.CampusMapService", side_effect=lambda data: CampusMapService(data, db)):
-                maintenance = AppTest.from_string(source_for(layout, "8_地图与地点维护.py"), default_timeout=40).run()
-                next(t for t in maintenance.text_input if t.label == "搜索已有地点").set_value("北区").run()
-                choice = next(s for s in maintenance.selectbox if s.label == "选择要维护的地点")
-                self.assertEqual(choice.options, ["新增地点", "北区路线"])
-                self.assertEqual(choice.value, "北区路线")
-                next(t for t in maintenance.text_input if t.label == "搜索已有地点").set_value("不存在").run()
-                self.assertTrue(any("没有找到匹配的地点" in i.value for i in maintenance.info))
+    def setUp(self):
+        temporary = self.enterContext(tempfile.TemporaryDirectory())
+        self.layout = pdf_fixture()
+        state = initial_pdf_state(self.layout)
+        state["places"] = {"示例起点": [0,5,5], "示例终点": [0,2,8]}
+        state["entrances"] = {
+            "示例起点": [{"name":"西门","point":[0,2,2],"enabled":True}],
+            "示例终点": [{"name":"入口","point":[0,2,8],"enabled":True}],
+        }
+        self.service = CampusMapService(state, Path(temporary) / "pdf.db")
+        self.enterContext(patch("database.pdf_map.open_pdf_project", side_effect=lambda: (self.layout, self.service, *self.service.load())))
 
-                nav = AppTest.from_string(source_for(layout), default_timeout=40).run()
-                next(c for c in nav.checkbox if c.label == "北侧限时门开放").check().run()
-                self.assertTrue(load_campus(db)[1]["north_gate_open"])
-                self.assertFalse(any("南侧门" in c.label for c in nav.checkbox))
-                refreshed = AppTest.from_string(source_for(layout, "8_地图与地点维护.py"), default_timeout=40).run()
-                self.assertTrue(next(c for c in refreshed.checkbox if "北侧限时门" in c.label).value)
-                self.assertFalse(any("南侧门" in c.label for c in refreshed.checkbox))
-                self.assertFalse(nav.exception)
+    def page(self, filename):
+        root = Path(__file__).resolve().parents[1]
+        return AppTest.from_file(str(root / "pages" / filename), default_timeout=40).run()
 
-    def test_cannot_block_a_saved_place(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            db, layout = tmp_path / "campus.db", tmp_path / "layout.json"
-            layout.write_text(json.dumps(layout_fixture(), ensure_ascii=False), encoding="utf-8")
-            with patch("database.campus_project.CampusMapService", side_effect=lambda data: CampusMapService(data, db)):
-                app = AppTest.from_string(source_for(layout, "8_地图与地点维护.py"), default_timeout=40).run()
-                revision, state = load_campus(db)
-                layer, row, col = next(iter(state["places"].values()))
-                next(s for s in app.selectbox if s.label == "地图层").select(layer)
-                next(n for n in app.number_input if n.label == "行").set_value(row)
-                next(n for n in app.number_input if n.label == "列").set_value(col)
-                next(b for b in app.button if b.label == "保存网格修改").click().run()
-                self.assertTrue(any("该格已有地点" in e.value for e in app.error))
-                self.assertEqual(load_campus(db)[0], revision)
+    def test_name_navigation_edit_and_history(self):
+        nav = self.page("navigation.py")
+        self.assertFalse(nav.exception)
+        self.assertTrue(any("搜索起点" == t.label for t in nav.text_input))
+        next(b for b in nav.button if b.label == "开始 A* 搜索").click().run()
+        self.assertFalse(nav.exception)
+        history = self.service.history()
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[0]["path_length"], 6)
+        self.assertEqual(history[0]["start_name"], "示例起点")
+        self.assertFalse(history[0]["snapshot"]["route_query"]["start_access"]["temporary"])
+        nav.slider[0].set_value(0).run()
+        next(c for c in nav.checkbox if c.label=="显示细网格与坐标").check().run()
+        next(r for r in nav.radio if r.label=="视图范围").set_value("当前路线或地点").run()
+        self.assertFalse(nav.exception)
+        self.assertEqual(len(self.service.history()),1)
+        record_page = self.page("route_history.py")
+        self.assertFalse(record_page.exception)
+        self.assertEqual(len(record_page.get("plotly_chart")), 1)
 
-    def test_save_conflict_stops_before_searching_with_stale_state(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            db, layout = tmp_path / "campus.db", tmp_path / "layout.json"
-            layout.write_text(json.dumps(layout_fixture(), ensure_ascii=False), encoding="utf-8")
-            with patch("database.campus_project.CampusMapService", side_effect=lambda data: CampusMapService(data, db)):
-                app = AppTest.from_string(source_for(layout, "8_地图与地点维护.py"), default_timeout=40).run()
-                self.assertFalse(app.exception)
-                with patch.object(CampusMapService, "save", side_effect=ValueError("地图已被其他会话修改")):
-                    next(b for b in app.button if b.label == "保存网格修改").click().run()
-                self.assertFalse(app.exception)
-                self.assertTrue(any("地图已被其他会话修改" in item.value for item in app.error))
-                self.assertFalse(any(b.label == "开始 A* 搜索" for b in app.button))
-                self.assertEqual(load_campus(db)[0], 0)
+        edit = self.page("map_management.py")
+        next(n for n in edit.number_input if n.label == "行").set_value(2)
+        next(n for n in edit.number_input if n.label == "列").set_value(5)
+        next(s for s in edit.selectbox if s.label == "调整分类").select(3)
+        next(b for b in edit.button if b.label == "保存网格修改").click().run()
+        self.assertFalse(edit.exception)
+        self.assertEqual(self.service.load()[1]["grids"][0][2][5], 1)
+        self.assertEqual(self.service.history()[0]["snapshot"]["grids"][0][2][5], 0)
+        next(b for b in nav.button if b.label == "开始 A* 搜索").click().run()
+        self.assertFalse(nav.exception)
+        self.assertFalse(self.service.history()[0]["found"])
 
-    def test_search_edit_recompute_and_history(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            db = tmp_path / "campus.db"
-            layout = tmp_path / "layout.json"
-            layout.write_text(json.dumps(layout_fixture(), ensure_ascii=False), encoding="utf-8")
-            with patch("database.campus_project.CampusMapService", side_effect=lambda data: CampusMapService(data, db)):
-                app = AppTest.from_string(source_for(layout), default_timeout=40).run()
-                self.assertFalse(app.exception)
-                next(t for t in app.text_input if t.label == "搜索起点").set_value("不存在的地点").run()
-                self.assertTrue(any("没有找到匹配的起点" in i.value for i in app.info))
-                self.assertEqual(len(app.get("plotly_chart")), 1)
-                next(t for t in app.text_input if t.label == "搜索起点").set_value("北区").run()
-                next(t for t in app.text_input if t.label == "搜索终点").set_value("南区").run()
-                next(s for s in app.selectbox if s.label == "起点").select("北区路线").run()
-                next(s for s in app.selectbox if s.label == "终点").select("南区路线").run()
-                next(b for b in app.button if b.label == "开始 A* 搜索").click().run()
-                self.assertFalse(app.exception)
-                history = campus_history(db)
-                self.assertEqual(len(history), 1)
-                self.assertTrue(history[0]["found"])
-                self.assertIn(2, {p[0] for p in history[0]["path"]})
-                app.slider[0].set_value(0).run()
-                self.assertFalse(app.exception)
-                history_app = AppTest.from_string(source_for(layout, "9_路线记录.py"), default_timeout=40).run()
-                next(b for b in history_app.button if b.label == "显示这条历史路线").click().run()
-                self.assertEqual(len(history_app.get("plotly_chart")), 1)
+    def test_edit_conflict_stops_and_audit_uses_new_grid(self):
+        edit = self.page("map_management.py")
+        with patch.object(CampusMapService, "save", side_effect=ValueError("地图已被其他会话修改")):
+            next(b for b in edit.button if b.label == "保存网格修改").click().run()
+        self.assertTrue(any("地图已被其他会话修改" in e.value for e in edit.error))
+        self.assertEqual(self.service.load()[0], 0)
+        audit = self.page("road_review.py")
+        self.assertFalse(audit.exception)
+        self.assertEqual(len(audit.get("plotly_chart")), 1)
+        self.assertEqual(len(self.service.load()[1]["places"]), 2)
 
-                path = history[0]["path"]
-                point = next(p for p in path[1:-1] if p[0] == 0 and tuple(p[1:]) not in blocked_grid_cells())
-                maintenance = AppTest.from_string(source_for(layout, "8_地图与地点维护.py"), default_timeout=40).run()
-                next(n for n in maintenance.number_input if n.label == "行").set_value(point[1])
-                next(n for n in maintenance.number_input if n.label == "列").set_value(point[2])
-                next(b for b in maintenance.button if b.label == "保存网格修改").click().run()
-                self.assertFalse(maintenance.exception)
-                self.assertEqual(load_campus(db)[1]["grids"][0][point[1]][point[2]], 1)
-                self.assertEqual(campus_history(db)[0]["path"], path)
-                next(b for b in app.button if b.label == "开始 A* 搜索").click().run()
-                self.assertFalse(app.exception)
-                updated = campus_history(db)[0]
-                self.assertEqual(updated["snapshot"]["grids"][0][point[1]][point[2]], 1)
-                self.assertNotIn(point, updated["path"])
+    def test_unavailable_named_entrance_does_not_save_invalid_route(self):
+        revision, state = self.service.load()
+        state["grids"][0][2][2] = 1
+        self.service.save(state, revision)
+        nav = self.page("navigation.py")
+        self.assertTrue(any("没有当前可用的已指定入口" in e.value for e in nav.error))
+        self.assertTrue(next(b for b in nav.button if b.label == "开始 A* 搜索").disabled)
+        self.assertEqual(self.service.history(), [])
+
+    def test_manual_building_marker_can_be_inside_building(self):
+        edit = self.page("map_management.py")
+        next(t for t in edit.text_input if t.label == "地点名称").set_value("示例建筑")
+        next(n for n in edit.number_input if n.label == "地点标记行").set_value(5)
+        next(n for n in edit.number_input if n.label == "地点标记列").set_value(5)
+        next(b for b in edit.button if b.label == "保存地点标记").click().run()
+        self.assertFalse(edit.exception)
+        state = self.service.load()[1]
+        self.assertEqual(state["places"]["示例建筑"], [0, 5, 5])
+        self.assertEqual(state["grids"][0][5][5], 1)
+        refreshed = self.page("map_management.py")
+        self.assertFalse(refreshed.exception)
+
+    def test_existing_building_search_loads_its_coordinates(self):
+        from database.pdf_map import set_building_marker
+        revision, state = self.service.load()
+        set_building_marker(state, "示例图书馆", 5, 5)
+        self.service.save(state, revision)
+        edit = self.page("map_management.py")
+        next(t for t in edit.text_input if t.label == "搜索已有地点").set_value("图书").run()
+        selected = next(s for s in edit.selectbox if s.label == "选择地点标记")
+        self.assertEqual(selected.value, "示例图书馆")
+        self.assertEqual(next(n for n in edit.number_input if n.label == "地点标记行").value, 5)
+        self.assertEqual(next(n for n in edit.number_input if n.label == "地点标记列").value, 5)
+
+    def test_named_search_keeps_map_visible_when_no_match(self):
+        nav = self.page("navigation.py")
+        next(t for t in nav.text_input if t.label == "搜索起点").set_value("不存在的名字").run()
+        self.assertFalse(nav.exception)
+        self.assertEqual(len(nav.get("plotly_chart")),1)
+        self.assertTrue(next(b for b in nav.button if b.label=="开始 A* 搜索").disabled)
 
 
 if __name__ == "__main__":

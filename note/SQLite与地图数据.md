@@ -1,3 +1,5 @@
+> 历史资料：本文对应 experiment 分支；experiment2 当前实现请以 README.md 和 note/新PDF地图.md 为准。
+
 # SQLite 与地图数据
 
 整理日期：2026-11-03。原阶段：05 SQLite 与业务闭环、06 校园地图数据导入。

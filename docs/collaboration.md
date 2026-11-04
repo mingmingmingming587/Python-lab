@@ -1,30 +1,27 @@
 # 协作约定
 
-## 数据约定
+当前开发分支为 experiment2，运行入口为 `app.py`。
 
-- 网格用非空矩形 `list[list[int]]` 表示：`0` 可通行，`1` 是障碍物。
-- 道路采集页的 `verified_grid(records, blocked_cells=())` 可叠加额外禁行格，禁行格优先；普通网格和 `astar_search` 接口不变。天桥与地面道路的立体交叉目前不能由单层网格安全表达。
-- 坐标统一为 `(row, col)`，从 0 开始；上、下、左、右移动，每步代价为 1。
-- A* 使用曼哈顿距离并自主实现；BFS 对比为后续可选功能。
-- 校园导航实验额外使用三张相同大小的二维网格（校内、校外道路、天桥）；`algorithms.layered_astar.layered_astar(grids, start, goal, portals)` 的坐标为 `(layer, row, col)`。每层四方向、代价为 1；仅在明确连接点换层，换层代价也为 1。曼哈顿启发式忽略层号，不会高估。原 `astar_search(grid, start, goal)` 保持不变。
-- 天桥只在端点连接校内网格，不能因图面与海油大街相交就直接换层；通向校外道路只通过标记的校门连接。北侧限时门默认关闭，状态需手动设置，不是实时门禁数据。图面坐标和端点仍为近似，禁止将试算结果表述为实际安全路线。
-- 校园实验地图和历史保存在 SQLite 独立表中，JSON 状态包含 `grids`、`places`、`place_status`、`portals` 和 `north_gate_open`。南侧门连接始终启用，旧数据若包含 `south_gate_open` 则忽略；北侧门状态手动设置，不代表实时门禁。保存采用版本检查，历史保存查询快照。不会覆盖原有模拟地图和历史。
-- 算法输入约定为 `grid, start, goal`，返回 `algorithms.path_result.PathResult`。具体函数由成员 B 实现。
-- `path` 包含起点和终点，`path_length` 为移动步数；起点等于终点时为 0，不可达时为 `None`。`visited_order` 记录实际扩展顺序，`expanded_count` 与其长度一致，`elapsed_ms` 为算法耗时。
-- 非法网格、越界或障碍物上的起终点应明确报错；不可达是正常搜索结果，`found=False` 且路径为空。
+## 数据
 
-地图和地点应在数据库中关联地图 ID；路线记录应保存算法、起终点、结果及统计信息。表结构和数据访问函数由成员 A 与其他成员共同确定后实现，不由页面直接操作数据库。
+- `classes` 是 180×90 的列表套列表，0 未标注、1 建筑、2 道路、3 边界。
+- `grids[0]` 是由分类生成的通行网格：道路为 0，其余为 1。当前 PDF 仅有平面层，`portals` 为空；旧版三层门和天桥坐标不迁入。
+- 算法坐标为 `(layer, row, col)`，当前 layer 为 0；同层上下左右移动，单位代价，曼哈顿启发式。未来加入跨层连接时只能显式指定。
+- `places` 为建筑位置标记，可以位于建筑格内；保存标记不得把建筑变成可走格。建筑标记与导航入口分开，入口尚未录入。`reference/building-markers.json` 包含 70 个建筑和 19 个场地标记，并绑定 PDF 文件指纹；首次加载时只补入缺失名称，不覆盖手动同名标记。
+- 新版本使用 `data/campuspath-integrated.db`，不修改旧数据库。
 
-## 分支与协作
+## 接口
 
-`main` 是共同开发基线；从最新 `main` 建立下列功能分支：
+- `open_pdf_project()` 返回 layout、service、revision、state。
+- `CampusMapService(initial_state, db_path)` 初始化独立地图，提供 load、save、save_route、history。save 使用 revision 检查并发修改，历史保存查询时的地图快照。
+- `layered_astar(grids, start, goal, portals=())` 返回 PathResult；path 包含两端，path_length 为步数，不可达为 None。建筑内部或越界端点应报错。
 
-| 分支 | 工作内容 |
-| --- | --- |
-| `feature/map-management` | A：地图和数据库 |
-| `feature/path-planning` | B：算法和测试 |
-| `feature/navigation-ui` | C：导航和可视化 |
+旧版协作和三人分支方案见 experiment 分支及历史计划 `docs/计划书261030.md`。地图来源及当前限制见 `note/新PDF地图.md`。
 
-各自提交后通过 Pull Request 请求其他成员检查并合并到 `main`；合并后同步 `main`，必要时更新各自分支。
+## 地点与入口
 
-不要提交 `local/`、虚拟环境、缓存或本地 SQLite 数据库；公共接口有变更时先沟通。真实校园数据应注明来源和核实状态，路线仅反映录入地图，定位为未来可选功能。运行时间受设备和测量方式影响，实验比较应保持条件一致，不应预设 A* 一定更快。
+- `place_kinds[name]` 为建筑或场地。场地中心可位于未标注格，但不会将其转换为可走格。
+- `entrances[name]` 为入口列表，每项含 name、point（层、行、列）、enabled。入口必须落在道路格。
+- `access_points` 优先使用已指定且可用的入口，缺少入口时才返回有 temporary 标志的临时道路接入点。
+- `plan_named_route` 比较可用入口组合的 A* 道路段步数；不会打开建筑或场地内部。
+- 查询快照 `route_query` 保存实际使用的接入点及是否临时。
