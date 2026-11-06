@@ -60,7 +60,7 @@ class LegacyDataTests(unittest.TestCase):
             self.assertEqual(raw, json.dumps(self.snapshot))
         state["classes"][0][0] = 3
         state["grid"][0][0] = 1
-        service.save(state, revision)
+        self.assertEqual(service.save(state), revision+1)
         reopened = CampusMapService(self.initial, self.db)
         self.assertEqual(reopened.load()[1]["grid"], [[1, 0]])
         self.assertEqual(reopened.history()[0]["snapshot"]["grid"], [[0, 0]])

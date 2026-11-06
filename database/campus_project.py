@@ -219,14 +219,14 @@ class CampusMapService:
                 })
             return map_row["revision"], state
 
-    def save(self, state, revision):
+    def save(self, state):
         state = _state_2d(state)
         with closing(self._connect()) as conn, conn:
-            cursor = conn.execute("UPDATE maps SET revision=revision+1 WHERE id=1 AND revision=?", (revision,))
-            if cursor.rowcount != 1:
-                raise ValueError("地图已被其他会话修改，请重新加载后再编辑")
+            revision = conn.execute("UPDATE maps SET revision=revision+1 WHERE id=1 RETURNING revision").fetchone()
+            if revision is None:
+                raise ValueError("地图尚未初始化")
             self._write_map(conn, state)
-        return revision + 1
+        return revision["revision"]
 
     def save_route(self, start, goal, state, result):
         state = _state_2d(state)

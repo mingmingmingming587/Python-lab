@@ -257,7 +257,7 @@ def open_pdf_project(pdf_path=PDF_PATH, db_path=PDF_DB_PATH):
     if state.get("source_hash") != layout["source_hash"]:
         raise ValueError("PDF 已更换，与已保存的地图版本不一致；请使用新的数据库")
     if merge_building_markers(state, layout):
-        revision = service.save(state, revision)
+        revision = service.save(state)
     return layout, service, revision, state
 
 

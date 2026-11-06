@@ -28,4 +28,4 @@
 - 新地图代码在 database/pdf_map.py、visualization/pdf_map.py 和 pages/ 下四个产品页面。
 - 建筑标记可位于建筑内部，不修改通行状态；新 PDF 已有 70 个建筑及 19 个场地标记，来源和坐标位于 reference/building-markers.json，入口与地点标记分开维护，缺少入口时使用明确标注待核实的临时接入点。
 - 旧模拟、APK/OSM 和旧图运行脚手架已清理，历史说明对应提交 `327c7b1`。
-- `visualization/workspace.py` 和 `visualization/workspace.css` 为共用地图工作台；保留 Streamlit、Plotly、SQLite 和现有 A*。地图选择不直接写数据库，批量修改和撤销必须保留 revision 校验。
+- `visualization/workspace.py` 和 `visualization/workspace.css` 为共用地图工作台；保留 Streamlit、Plotly、SQLite 和现有 A*。地图选择和撤销只更新草稿，保存地图时在 SQLite 事务中替换整张地图。

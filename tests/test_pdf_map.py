@@ -116,11 +116,9 @@ class PDFMapTests(unittest.TestCase):
             service.save_route("start cell", "goal cell", state, result)
             state["classes"][2][5] = 3
             state["grid"][2][5] = 1
-            service.save(state, revision)
+            self.assertEqual(service.save(state), revision+1)
             self.assertFalse(astar(state["grid"], (2, 2), (2, 8)).found)
             self.assertEqual(service.history()[0]["snapshot"]["grid"][2][5], 0)
-            with self.assertRaises(ValueError):
-                service.save(state, revision)
             with patch("database.pdf_map.load_pdf_map", return_value={**layout, "source_hash": "different"}):
                 with self.assertRaises(ValueError):
                     open_pdf_project(db_path=db)
