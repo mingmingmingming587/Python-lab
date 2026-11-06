@@ -1,6 +1,6 @@
 """以地点名称查询路网路线；地点标记与道路入口相互独立。"""
 
-from algorithms.layered_astar import astar
+from algorithms.astar import astar
 
 
 def access_points(state, name):

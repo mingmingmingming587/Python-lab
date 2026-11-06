@@ -1,7 +1,7 @@
 from collections import deque
 import unittest
 
-from algorithms.layered_astar import CampusMap, astar
+from algorithms.astar import CampusMap, astar
 
 
 class AStarTests(unittest.TestCase):

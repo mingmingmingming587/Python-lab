@@ -26,7 +26,7 @@ class NavigationTests(unittest.TestCase):
             app.switch_page("pages/map_management.py").run()
             self.assertFalse(app.exception)
             self.assertEqual(app.session_state["control_width"], 33)
-            self.assertTrue(any(button.label == "保存地点标记" for button in app.button))
+            self.assertTrue(any(button.label == "应用地点标记" for button in app.button))
             app.switch_page("pages/route_history.py").run()
             self.assertFalse(app.exception)
             self.assertIn("路线记录", [title.value for title in app.subheader])

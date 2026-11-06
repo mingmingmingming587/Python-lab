@@ -1,6 +1,6 @@
 """Streamlit 地图工作台。四个入口共用地图、视图设置和会话选择。"""
 
-from collections import Counter
+from collections import Counter, deque
 from copy import deepcopy
 import json
 from math import ceil, floor
@@ -17,6 +17,7 @@ from visualization.pdf_map import pdf_map_figure
 
 
 MODES = ["导航", "地点", "历史", "维护"]
+EDIT_HISTORY_LIMIT = 20
 
 
 def _swap_endpoints():
@@ -93,17 +94,83 @@ def _map_selected():
     ss.map_needs_app = True
 
 
-def _save(service, revision, before, edited, label):
-    """一次保存对应一次撤销；版本检查保护其他会话的修改。"""
+def _stage_edit(revision, before, edited):
+    if edited == before:
+        return
+    ss = st.session_state
+    draft = ss.get("map_draft")
+    if draft is None:
+        draft = {"revision": revision, "undo": deque(maxlen=EDIT_HISTORY_LIMIT), "redo": []}
+        ss.map_draft = draft
+    draft["undo"].append(before)
+    draft["redo"].clear()
+    draft["state"] = edited
+    st.rerun()
+
+
+def _reset_place_forms():
+    ss = st.session_state
+    ss.pop("marker_for", None)
+    ss.pop("entry_for", None)
+
+
+def _draft_controls(saved, service, revision):
+    ss = st.session_state
+    draft = ss.get("map_draft")
+    st.caption("地图草稿 · 应用修改后可预览，点击「保存地图」后生效。")
+    left, right = st.columns(2)
+    back = left.button("后退", key="map_draft_undo", disabled=not (draft and draft["undo"]),
+                       width="stretch")
+    forward = right.button("前进", key="map_draft_redo", disabled=not (draft and draft["redo"]),
+                           width="stretch")
+    st.caption("Ctrl+Z 后退 · Ctrl+Y 前进")
+    st.html("""<script>
+        if (!window.campusPathDraftShortcuts) {
+            window.campusPathDraftShortcuts = true;
+            document.addEventListener("keydown", (event) => {
+                if (!event.ctrlKey || event.shiftKey || event.altKey || event.metaKey ||
+                    event.repeat || event.defaultPrevented ||
+                    event.target.closest?.("input, textarea, select, [role=textbox]") ||
+                    event.target.isContentEditable) return;
+                const key = event.key.toLowerCase();
+                const action = {z: "undo", y: "redo"}[key];
+                if (!action) return;
+                const button = document.querySelector(".st-key-map_draft_" + action + " button");
+                if (!button || button.disabled) return;
+                event.preventDefault();
+                button.click();
+            });
+        }
+        </script>""", unsafe_allow_javascript=True)
+
+    if back or forward:
+        source, destination = ("undo", "redo") if back else ("redo", "undo")
+        draft[destination].append(draft["state"])
+        draft["state"] = draft[source].pop()
+        _reset_place_forms()
+        st.rerun()
+
+    stale = draft is not None and draft["revision"] != revision
+    if stale:
+        st.warning("地图已被其他会话修改。请放弃当前草稿，再基于最新地图编辑。")
+    save = st.button("保存地图", type="primary", width="stretch",
+                     disabled=draft is None or stale or draft["state"] == saved)
+    if st.button("放弃草稿", width="stretch", disabled=draft is None):
+        ss.pop("map_draft")
+        _reset_place_forms()
+        st.rerun()
+    if not save:
+        return
+
     try:
-        new_revision = service.save(edited, revision)
+        service.save(draft["state"], draft["revision"])
     except ValueError as error:
         st.error(str(error))
-        st.stop()
-    st.session_state.undo_edit = (new_revision, deepcopy(before), label)
-    st.session_state.pop("nav_route", None)
-    st.session_state.playing = False
-    st.session_state.notice = label + "，已保存"
+        return
+    ss.pop("map_draft")
+    ss.pop("nav_route", None)
+    ss.playing = False
+    ss.notice = "地图已保存"
     st.rerun()
 
 
@@ -213,7 +280,7 @@ def _navigation(state, service, revision):
     return view
 
 
-def _places(state, service, revision):
+def _places(state, revision):
     ss = st.session_state
     st.subheader("地点与建筑入口")
     options = ["新增地点标记",*state["places"]]
@@ -238,7 +305,7 @@ def _places(state, service, revision):
         c1,c2 = st.columns(2)
         c1.number_input("地点标记行",0,ROWS-1,key="_marker_row")
         c2.number_input("地点标记列",0,COLS-1,key="_marker_col")
-        if st.form_submit_button("保存地点标记",type="primary",width="stretch"):
+        if st.form_submit_button("应用地点标记",width="stretch"):
             edited = deepcopy(state)
             try:
                 set_building_marker(edited,ss._marker_name,ss._marker_row,ss._marker_col,
@@ -247,13 +314,13 @@ def _places(state, service, revision):
                 st.error(str(error))
             else:
                 ss.selected_place = ss._marker_name.strip()
-                _save(service,revision,state,edited,"地点标记已更新")
+                _stage_edit(revision,state,edited)
     selected_point = [ss._marker_row,ss._marker_col]
     if old_name:
         with st.expander("导航入口：新增或修改",expanded=True):
             entries = state.get("entrances",{}).get(old_name,[])
             if not entries:
-                st.caption("该地点尚未录入入口，保存入口后会在地图上显示方形图标。")
+                st.caption("该地点尚未录入入口。应用入口后，地图预览会显示方形图标。")
             entry_choice = st.selectbox("选择入口",["新增入口",*[e["name"] for e in entries]])
             entry = next((e for e in entries if e["name"]==entry_choice),None)
             identity = (old_name,entry_choice)
@@ -268,7 +335,7 @@ def _places(state, service, revision):
                 c1.number_input("入口行",0,ROWS-1,key="_entry_row")
                 c2.number_input("入口列",0,COLS-1,key="_entry_col")
                 st.checkbox("入口启用",key="_entry_enabled")
-                if st.form_submit_button("保存入口",width="stretch"):
+                if st.form_submit_button("应用入口",width="stretch"):
                     edited = deepcopy(state)
                     try:
                         set_place_entrance(edited,old_name,ss._entry_name,ss._entry_row,ss._entry_col,
@@ -276,7 +343,7 @@ def _places(state, service, revision):
                     except ValueError as error:
                         st.error(str(error))
                     else:
-                        _save(service,revision,state,edited,"导航入口已更新")
+                        _stage_edit(revision,state,edited)
             st.caption("入口必须位于道路格。可维护多个入口，停用后不参与导航。")
             if ss.map_tool == "入口位置":
                 selected_point = [ss._entry_row,ss._entry_col]
@@ -310,10 +377,10 @@ def _history(state, service):
                   "access_start":a["point"] if a else None,"access_goal":b["point"] if b else None}
 
 
-def _maintenance(state, service, revision):
+def _maintenance(state, revision):
     ss = st.session_state
     st.subheader("地图维护")
-    st.caption("点选一个格子，或框选一片区域，再确认保存。")
+    st.caption("点选一个格子，或框选一片区域，再把分类应用到草稿。")
     with st.form("grid_edit"):
         c1,c2 = st.columns(2)
         row = c1.number_input("行",0,ROWS-1,key="_edit_row")
@@ -325,23 +392,11 @@ def _maintenance(state, service, revision):
         st.caption(f"选区：行 {bounds[0]}～{bounds[2]}，列 {bounds[1]}～{bounds[3]} · {count} 格")
         classification = st.selectbox("调整分类",range(4),format_func=lambda i:CLASS_NAMES[i])
         st.caption("当前首格："+CLASS_NAMES[state["classes"][row][col]])
-        if st.form_submit_button("保存网格修改",type="primary",width="stretch"):
+        if st.form_submit_button("应用网格修改",width="stretch"):
             edited = deepcopy(state)
             set_grid_region(edited,bounds,classification)
-            _save(service,revision,state,edited,f"{count} 个格子已更新")
-    st.caption("仅道路格可通行。框选不会自动保存，也不会自动补路。")
-    undo = ss.get("undo_edit")
-    if st.button("撤销上次修改",disabled=not undo,width="stretch"):
-        try:
-            service.save(undo[1],undo[0])
-        except ValueError as error:
-            st.error(str(error))
-        else:
-            ss.pop("undo_edit",None)
-            ss.pop("nav_route",None)
-            ss.playing = False
-            ss.notice = "已撤销："+undo[2]
-            st.rerun()
+            _stage_edit(revision,state,edited)
+    st.caption("仅道路格可通行。框选只预览选区。")
     st.download_button("导出当前地图 JSON",json.dumps({"format":"campuspath-integrated-1","state":state},ensure_ascii=False,indent=2),
                        file_name="campus-map.json",mime="application/json",width="stretch")
     with st.expander("道路信息核查",expanded=True):
@@ -390,10 +445,13 @@ def render_workspace(default_mode="导航"):
              "历史":["查看"],"维护":["查看","选格","框选"]}[mode]
     if ss.map_tool not in tools:
         ss.map_tool = "查看"
-    _header(state,revision)
+    editing = mode in ("地点", "维护")
+    draft = ss.get("map_draft") if editing else None
+    display_state = draft["state"] if draft else state
+    _header(display_state,revision)
     controls,map_panel = st.container(key="workspace_layout").columns(
         [ss.control_width,100-ss.control_width],gap="medium")
-    display_state,view = state,{}
+    view = {}
     with controls:
         with st.container(height=780,border=True,key="workspace_controls"):
             st.segmented_control("操作台",MODES,key="_workspace_mode",default=mode,selection_mode="single",
@@ -405,14 +463,16 @@ def render_workspace(default_mode="导航"):
             notice = ss.pop("notice",None)
             if notice:
                 st.success(notice)
+            if editing:
+                _draft_controls(state, service, revision)
             if mode=="导航":
                 view = _navigation(state,service,revision)
             elif mode=="地点":
-                view = _places(state,service,revision)
+                view = _places(display_state,revision)
             elif mode=="历史":
                 display_state,view = _history(state,service)
             else:
-                view = _maintenance(state,service,revision)
+                view = _maintenance(display_state,revision)
     with map_panel:
         with st.container(height=780,border=True,key="workspace_map_panel"):
             tools_col,options_col = st.columns([3,2],vertical_alignment="center")

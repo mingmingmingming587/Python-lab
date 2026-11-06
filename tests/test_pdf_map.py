@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from PIL import Image
 
-from algorithms.layered_astar import astar
+from algorithms.astar import astar
 from database.pdf_map import (PDF_PATH, ROWS, COLS, EXPECTED_COUNTS, load_pdf_map,
                               initial_pdf_state, open_pdf_project, road_components,
                               set_building_marker, merge_building_markers)

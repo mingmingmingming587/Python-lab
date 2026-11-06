@@ -50,7 +50,8 @@ class CampusAppTests(unittest.TestCase):
         next(n for n in edit.number_input if n.label == "行").set_value(2)
         next(n for n in edit.number_input if n.label == "列").set_value(5)
         next(s for s in edit.selectbox if s.label == "调整分类").select(3)
-        next(b for b in edit.button if b.label == "保存网格修改").click().run()
+        next(b for b in edit.button if b.label == "应用网格修改").click().run()
+        next(b for b in edit.button if b.label == "保存地图").click().run()
         self.assertFalse(edit.exception)
         self.assertEqual(self.service.load()[1]["grid"][2][5], 1)
         self.assertEqual(self.service.history()[0]["snapshot"]["grid"][2][5], 0)
@@ -60,9 +61,12 @@ class CampusAppTests(unittest.TestCase):
 
     def test_edit_conflict_stops_and_audit_uses_new_grid(self):
         edit = self.page("road_review.py")
+        next(s for s in edit.selectbox if s.label == "调整分类").select(3)
+        next(b for b in edit.button if b.label == "应用网格修改").click().run()
         with patch.object(CampusMapService, "save", side_effect=ValueError("地图已被其他会话修改")):
-            next(b for b in edit.button if b.label == "保存网格修改").click().run()
+            next(b for b in edit.button if b.label == "保存地图").click().run()
         self.assertTrue(any("地图已被其他会话修改" in e.value for e in edit.error))
+        self.assertTrue(edit.session_state["map_draft"]["undo"])
         self.assertEqual(self.service.load()[0], 0)
         audit = self.page("road_review.py")
         self.assertFalse(audit.exception)
@@ -71,6 +75,7 @@ class CampusAppTests(unittest.TestCase):
 
     def test_unavailable_named_entrance_does_not_save_invalid_route(self):
         revision, state = self.service.load()
+        state["classes"][2][2] = 3
         state["grid"][2][2] = 1
         self.service.save(state, revision)
         nav = self.page("navigation.py")
@@ -83,7 +88,9 @@ class CampusAppTests(unittest.TestCase):
         next(t for t in edit.text_input if t.label == "地点名称").set_value("示例建筑")
         next(n for n in edit.number_input if n.label == "地点标记行").set_value(5)
         next(n for n in edit.number_input if n.label == "地点标记列").set_value(5)
-        next(b for b in edit.button if b.label == "保存地点标记").click().run()
+        next(b for b in edit.button if b.label == "应用地点标记").click().run()
+        self.assertNotIn("示例建筑", self.service.load()[1]["places"])
+        next(b for b in edit.button if b.label == "保存地图").click().run()
         self.assertFalse(edit.exception)
         state = self.service.load()[1]
         self.assertEqual(state["places"]["示例建筑"], [5, 5])
@@ -127,7 +134,7 @@ class CampusAppTests(unittest.TestCase):
         self.assertEqual(len(self.service.history()),1)
         self.assertTrue(any("示例终点" in s.value for s in nav.success))
 
-    def test_region_save_undo_and_history_snapshot(self):
+    def test_region_undo_redo_and_history_snapshot(self):
         nav = self.page("navigation.py")
         next(b for b in nav.button if b.label=="开始 A* 搜索").click().run()
         edit = self.page("road_review.py")
@@ -136,28 +143,59 @@ class CampusAppTests(unittest.TestCase):
         edit.session_state["_edit_col"] = 4
         edit.run()
         next(s for s in edit.selectbox if s.label=="调整分类").select(3)
-        next(b for b in edit.button if b.label=="保存网格修改").click().run()
+        initial = self.service.load()
+        next(b for b in edit.button if b.label=="应用网格修改").click().run()
         self.assertFalse(edit.exception)
-        saved = self.service.load()[1]
-        self.assertEqual(saved["classes"][2][4:7],[3,3,3])
-        self.assertEqual(saved["grid"][2][4:7],[1,1,1])
+        draft = edit.session_state["map_draft"]
+        self.assertEqual(draft["state"]["classes"][2][4:7],[3,3,3])
+        self.assertEqual(draft["state"]["grid"][2][4:7],[1,1,1])
         self.assertEqual(self.service.history()[0]["snapshot"]["grid"][2][4:7],[0, 0, 0])
-        next(b for b in edit.button if b.label=="撤销上次修改").click().run()
+        next(s for s in edit.selectbox if s.label=="调整分类").select(1)
+        next(b for b in edit.button if b.label=="应用网格修改").click().run()
+        next(b for b in edit.button if b.label=="后退").click().run()
+        self.assertEqual(draft["state"]["classes"][2][4:7],[3,3,3])
+        next(b for b in edit.button if b.label=="后退").click().run()
         self.assertFalse(edit.exception)
-        self.assertEqual(self.service.load()[1]["grid"][2][4:7],[0, 0, 0])
-        self.assertTrue(next(b for b in edit.button if b.label=="撤销上次修改").disabled)
+        self.assertEqual(draft["state"]["grid"][2][4:7],[0, 0, 0])
+        self.assertTrue(next(b for b in edit.button if b.label=="后退").disabled)
+        next(g for g in edit.get("button_group") if g.label=="操作台").set_value("地点").run()
+        next(b for b in edit.button if b.label=="前进").click().run()
+        self.assertEqual(draft["state"]["classes"][2][4:7],[3,3,3])
+        next(b for b in edit.button if b.label=="前进").click().run()
+        self.assertEqual(draft["state"]["classes"][2][4:7],[1,1,1])
+        self.assertTrue(next(b for b in edit.button if b.label=="前进").disabled)
 
-    def test_undo_does_not_overwrite_another_session(self):
+        next(b for b in edit.button if b.label=="后退").click().run()
+        next(g for g in edit.get("button_group") if g.label=="操作台").set_value("维护").run()
+        next(n for n in edit.number_input if n.label=="行").set_value(2)
+        next(n for n in edit.number_input if n.label=="列").set_value(4)
+        next(s for s in edit.selectbox if s.label=="调整分类").select(0)
+        next(b for b in edit.button if b.label=="应用网格修改").click().run()
+        self.assertFalse(edit.exception)
+        self.assertTrue(next(b for b in edit.button if b.label=="前进").disabled)
+        self.assertEqual(self.service.load(), initial)
+        next(b for b in edit.button if b.label=="保存地图").click().run()
+        revision, saved = self.service.load()
+        self.assertEqual(revision, initial[0]+1)
+        self.assertEqual(saved["classes"][2][4:7],[0,0,0])
+        self.assertTrue(next(b for b in edit.button if b.label=="后退").disabled)
+        self.assertEqual(self.service.history()[0]["snapshot"]["grid"][2][4:7],[0,0,0])
+
+    def test_stale_draft_does_not_overwrite_another_session(self):
         edit = self.page("road_review.py")
         next(s for s in edit.selectbox if s.label=="调整分类").select(3)
-        next(b for b in edit.button if b.label=="保存网格修改").click().run()
+        next(b for b in edit.button if b.label=="应用网格修改").click().run()
         revision,state = self.service.load()
         state["classes"][1][1] = 2
         state["grid"][1][1] = 0
         self.service.save(state,revision)
-        next(b for b in edit.button if b.label=="撤销上次修改").click().run()
-        self.assertTrue(any("其他会话" in e.value for e in edit.error))
-        self.assertEqual(self.service.load()[1]["grid"][1][1],0)
+        edit.run()
+        self.assertTrue(any("其他会话" in w.value for w in edit.warning))
+        for label in ("后退", "前进", "放弃草稿"):
+            next(b for b in edit.button if b.label==label).click().run()
+            self.assertTrue(next(b for b in edit.button if b.label=="保存地图").disabled)
+            self.assertEqual(self.service.load()[1]["grid"][1][1],0)
+        self.assertNotIn("map_draft", edit.session_state)
 
     def test_search_playback_does_not_repeat_query(self):
         nav = self.page("navigation.py")

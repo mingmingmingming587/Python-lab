@@ -6,4 +6,4 @@
 
 原图名来自 PDF 图面，建筑位置不会自动转为导航点。PDF 不包含天桥三层结构，当前仅按平面地图计算。
 
-此前的 `reference/campus-map.pdf`、`reference/campus-map.webp` 和 `reference/campus-layout.json` 留作本机历史资料；对应提取与旧图实现保留在 experiment 分支。它们不参与 experiment2 运行。资料公开分发权限需单独核实。
+此前的 `reference/campus-map.pdf`、`reference/campus-map.webp` 和 `reference/campus-layout.json` 可能留作本机历史资料；对应旧图实现可在提交 `327c7b1` 中查看。这些文件不参与当前版本运行。资料公开分发权限需单独核实。
