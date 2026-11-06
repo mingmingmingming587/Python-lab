@@ -1,4 +1,4 @@
-> 历史资料：本文对应 experiment 分支；experiment2 当前实现请以 README.md 和 note/新PDF地图.md 为准。
+> 历史资料：本文介绍旧版模拟地图；当前实现请以 README.md 和 note/新PDF地图.md 为准。旧版数据库已删除。
 
 # SQLite 与地图数据
 

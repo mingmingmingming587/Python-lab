@@ -171,6 +171,20 @@ def set_place_entrance(state, place, name, row, col, *, enabled=True, old_name=N
     entries.append({"name": name, "point": [0, row, col], "enabled": bool(enabled)})
 
 
+def set_grid_region(state, bounds, classification):
+    """修改闭区间内的分类与通行网格；选择和预览本身不写数据库。"""
+    if (len(bounds) != 4 or any(type(v) is not int for v in bounds) or
+            type(classification) is not int or classification not in range(4)):
+        raise ValueError("网格选区或分类无效")
+    r1, c1, r2, c2 = bounds
+    if not (0 <= r1 <= r2 < ROWS and 0 <= c1 <= c2 < COLS):
+        raise ValueError("网格选区超出地图")
+    for row in range(r1, r2+1):
+        for col in range(c1, c2+1):
+            state["classes"][row][col] = classification
+            state["grids"][0][row][col] = 0 if classification == 2 else 1
+
+
 def open_pdf_project(pdf_path=PDF_PATH, db_path=PDF_DB_PATH):
     layout = load_pdf_map(pdf_path)
     service = CampusMapService(initial_pdf_state(layout), db_path)

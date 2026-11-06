@@ -1,6 +1,6 @@
 # 协作约定
 
-当前开发分支为 experiment2，运行入口为 `app.py`。
+当前开发分支为 `experiment`，已合入原 `experiment1.2`，运行入口为 `app.py`。
 
 ## 数据
 
@@ -16,7 +16,7 @@
 - `CampusMapService(initial_state, db_path)` 初始化独立地图，提供 load、save、save_route、history。save 使用 revision 检查并发修改，历史保存查询时的地图快照。
 - `layered_astar(grids, start, goal, portals=())` 返回 PathResult；path 包含两端，path_length 为步数，不可达为 None。建筑内部或越界端点应报错。
 
-旧版协作和三人分支方案见 experiment 分支及历史计划 `docs/计划书261030.md`。地图来源及当前限制见 `note/新PDF地图.md`。
+旧版地图实现可查看提交 `327c7b1`；协作约定的历史计划见 `docs/计划书261030.md`。地图来源及当前限制见 `note/新PDF地图.md`。
 
 ## 地点与入口
 
@@ -25,3 +25,10 @@
 - `access_points` 优先使用已指定且可用的入口，缺少入口时才返回有 temporary 标志的临时道路接入点。
 - `plan_named_route` 比较可用入口组合的 A* 道路段步数；不会打开建筑或场地内部。
 - 查询快照 `route_query` 保存实际使用的接入点及是否临时。
+
+## 地图工作台
+
+- `visualization/workspace.py` 共用导航、地点、历史和维护界面；`pages/` 保留原地址入口。样式在 `visualization/workspace.css`，Streamlit 主题在 `.streamlit/config.toml`。
+- `set_grid_region(state, bounds, classification)` 同步修改分类和通行网格；`bounds` 是闭区间 `(起始行, 起始列, 结束行, 结束列)`，必须先校验整个范围，再改格子。
+- 图面仍使用热力图；编辑时临时增加格心散点接收 Plotly 原生选择事件。地点点选数据为 `[layer, row, col, kind, name]`。选择只更新会话，确认保存时才写 SQLite。
+- 导航选择、视图和播放进度与控件临时键分开保存，避免切换模式或入口时被 Streamlit 清理。单步撤销也使用数据库 revision 校验，不覆盖其他会话的修改。

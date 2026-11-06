@@ -142,6 +142,38 @@ class PDFMapTests(unittest.TestCase):
         self.assertEqual(len(detailed.layout.images),1)
         self.assertEqual(state["grids"][0],original)
 
+    def test_named_map_retains_every_place_and_source_text_layer(self):
+        state=initial_pdf_state(pdf_fixture())
+        state["places"]={"图书馆":[0,5,5],"运动场":[0,5,6],"教学楼":[0,6,5]}
+        original=[line[:] for line in state["grids"][0]]
+        figure=pdf_map_figure(pdf_fixture(),state,show_background=True,show_building_labels=True)
+        trace=next(t for t in figure.data if t.name=="地点位置标记")
+        self.assertEqual(set(trace.text),set(state["places"]))
+        self.assertEqual(trace.mode,"markers+text")
+        self.assertGreaterEqual(trace.textfont.size,12)
+        self.assertGreater(len(set(trace.textposition)),1)
+        self.assertEqual(len(figure.layout.images),1)
+        self.assertEqual(state["grids"][0],original)
+
+    def test_multiple_entrances_show_status_without_changing_the_grid(self):
+        layout = pdf_fixture()
+        state = initial_pdf_state(layout)
+        state["places"] = {"图书馆": [0, 5, 5]}
+        state["entrances"] = {"图书馆": [
+            {"name": "东门", "point": [0, 2, 2], "enabled": True},
+            {"name": "西门", "point": [0, 2, 3], "enabled": False},
+            {"name": "北门", "point": [0, 5, 5], "enabled": True},
+        ]}
+        before = [row[:] for row in state["grids"][0]]
+        figure = pdf_map_figure(layout, state)
+        trace = next(trace for trace in figure.data if trace.name == "已录入入口")
+        self.assertEqual([item[5] for item in trace.customdata], ["东门", "西门", "北门"])
+        self.assertEqual([item[6] for item in trace.customdata], ["已启用", "已停用", "道路不可通行"])
+        self.assertEqual(list(trace.marker.symbol), ["square", "square-open", "square"])
+        self.assertEqual(state["grids"][0], before)
+        del state["entrances"]
+        self.assertNotIn("已录入入口", [trace.name for trace in pdf_map_figure(layout, state).data])
+
 
 if __name__ == "__main__":
     unittest.main()

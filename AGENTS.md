@@ -22,9 +22,10 @@
 - 修改前先检查工作区和相关代码，保留他人的未提交工作；不要擅自提交、推送或删除分支。
 - 按变更范围运行适当的检查；报告实际完成的功能与仍为占位的部分。
 
-## experiment2 当前实现
+## experiment 当前实现
 
-- 新 PDF 为 180×90 分类网格；当前只有平面层，旧版三层描述对应 experiment，不直接套用旧的校门和天桥坐标。
+- 新 PDF 为 180×90 分类网格；当前只有平面层，旧版三层描述对应提交 `327c7b1`，不直接套用旧的校门和天桥坐标。
 - 新地图代码在 database/pdf_map.py、visualization/pdf_map.py 和 pages/ 下四个产品页面。
 - 建筑标记可位于建筑内部，不修改通行状态；新 PDF 已有 70 个建筑及 19 个场地标记，来源和坐标位于 reference/building-markers.json，入口与地点标记分开维护，缺少入口时使用明确标注待核实的临时接入点。
-- 旧模拟、APK/OSM 和旧图运行脚手架已清理，历史说明对应 experiment 分支。
+- 旧模拟、APK/OSM 和旧图运行脚手架已清理，历史说明对应提交 `327c7b1`。
+- `visualization/workspace.py` 和 `visualization/workspace.css` 为共用地图工作台；保留 Streamlit、Plotly、SQLite 和现有 A*。地图选择不直接写数据库，批量修改和撤销必须保留 revision 校验。

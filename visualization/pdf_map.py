@@ -10,6 +10,37 @@ from database.pdf_map import ROWS, COLS, CLASS_NAMES
 COLORS = ("#f4f6f5", "#ead39b", "#a6d5bd", "#e6afb1")
 
 
+def _name_positions(points, names, cell_pixels):
+    """尝试八个方向放名称，优先减少文字重叠和超出图面。"""
+    height, gap = 15/cell_pixels, 8/cell_pixels
+    occupied, positions = [], ["top center"] * len(points)
+    for index in sorted(range(len(points)),key=lambda i:points[i][-2:]):
+        row,col = points[index][-2:]
+        x,y = col+.5,row+.5
+        width = (sum(.55 if ord(c)<128 else 1 for c in names[index])*12+4)/cell_pixels
+        candidates = [
+            ("top center",x-width/2,y-gap-height),
+            ("bottom center",x-width/2,y+gap),
+            ("middle right",x+gap,y-height/2),
+            ("middle left",x-gap-width,y-height/2),
+            ("top right",x+gap,y-gap-height),
+            ("top left",x-gap-width,y-gap-height),
+            ("bottom right",x+gap,y+gap),
+            ("bottom left",x-gap-width,y+gap),
+        ]
+        def score(candidate):
+            _,left,top = candidate
+            right,bottom = left+width,top+height
+            overlap = sum(max(0,min(right,r)-max(left,l))*max(0,min(bottom,b)-max(top,t))
+                          for l,t,r,b in occupied)
+            outside = max(0,-left)+max(0,right-COLS)+max(0,-top)+max(0,bottom-ROWS)
+            return overlap+outside*100
+        position,left,top = min(candidates,key=score)
+        positions[index] = position
+        occupied.append((left,top,left+width,top+height))
+    return positions
+
+
 def _overlay(fig, points, name, color, show_grid=False):
     points = {(p[-2], p[-1]) for p in points}
     if not points:
@@ -27,7 +58,8 @@ def _overlay(fig, points, name, color, show_grid=False):
 def pdf_map_figure(layout, state, start=None, goal=None, result=None, step=None,
                    show_background=False, selected=None, show_building_labels=False,
                    access_start=None, access_goal=None, show_grid=False,
-                   show_visited=False, focus=False):
+                   show_visited=False, focus=False, selectable_cells=False,
+                   selection_bounds=None, view_revision=0, label_cell_pixels=9.5):
     fig = go.Figure()
     if show_background:
         fig.add_layout_image(source="data:image/png;base64," + b64encode(layout["background"]).decode(),
@@ -57,6 +89,20 @@ def pdf_map_figure(layout, state, start=None, goal=None, result=None, step=None,
                                (access_goal, "终点道路接入", "#db2777")):
         if point is not None:
             _overlay(fig, [point], name, color, show_grid)
+    if selection_bounds:
+        r1, c1, r2, c2 = selection_bounds
+        _overlay(fig, [(r, c) for r in range(r1, r2+1) for c in range(c1, c2+1)],
+                 "待修改选区", "rgba(139,92,246,.45)", show_grid)
+    if selectable_cells:
+        # 热力图不提供原生点选；仅在编辑时增加可选择的格心散点层。
+        fig.add_trace(go.Scattergl(
+            x=[c+.5 for r in range(ROWS) for c in range(COLS)],
+            y=[r+.5 for r in range(ROWS) for c in range(COLS)],
+            mode="markers", marker=dict(size=7, color="rgba(15,118,110,.025)"),
+            customdata=[[0,r,c,"网格",""] for r in range(ROWS) for c in range(COLS)],
+            hovertemplate="行 %{customdata[1]}，列 %{customdata[2]}<extra></extra>",
+            name="网格选取", selected=dict(marker=dict(opacity=.25)),
+            unselected=dict(marker=dict(opacity=.025))))
     if state["places"]:
         names = list(state["places"])
         points = [state["places"][name] for name in names]
@@ -70,9 +116,12 @@ def pdf_map_figure(layout, state, start=None, goal=None, result=None, step=None,
         fig.add_trace(go.Scatter(
             x=[p[2]+.5 for p in points], y=[p[1]+.5 for p in points],
             mode="markers+text" if show_building_labels else "markers",
-            text=names, textposition="top center",
-            textfont=dict(size=10,color="#334155"),
-            customdata=[[*p,kind] for p,kind in zip(points,kinds)],
+            text=[escape(name) for name in names],
+            textposition=_name_positions(points,names,label_cell_pixels) if show_building_labels else "top center",
+            textfont=dict(size=12,color="#18362d",family="Microsoft YaHei, sans-serif",
+                          shadow="0 0 3px white, 0 0 3px white, 0 0 2px white"),
+            cliponaxis=False,
+            customdata=[[*p,kind,name] for p,kind,name in zip(points,kinds,names)],
             marker=dict(size=[11 if tuple(p[-2:]) in highlighted else 7 for p in points],
                         color=point_colors, symbol="circle",
                         line=dict(color="white",width=1)),
@@ -87,6 +136,34 @@ def pdf_map_figure(layout, state, start=None, goal=None, result=None, step=None,
                         font=dict(size=11,color=color),bgcolor="rgba(255,255,255,.94)",
                         bordercolor=color,borderpad=4,
                         xanchor="left" if p[2]<10 else "right" if p[2]>80 else "center")
+    entrances = []
+    for place, items in state.get("entrances", {}).items():
+        if place not in state["places"]:
+            continue
+        for entry in items:
+            layer, row, col = entry["point"]
+            if layer != 0 or not (0 <= row < ROWS and 0 <= col < COLS):
+                continue
+            if not entry.get("enabled", True):
+                status, color, symbol = "已停用", "#64748b", "square-open"
+            elif state["grids"][0][row][col] != 0:
+                status, color, symbol = "道路不可通行", "#b45309", "square"
+            else:
+                status, color, symbol = "已启用", "#0f766e", "square"
+            entrances.append((place, entry["name"], row, col, status, color, symbol))
+    if entrances:
+        fig.add_trace(go.Scatter(
+            x=[col+.5 for _, _, _, col, _, _, _ in entrances],
+            y=[row+.5 for _, _, row, _, _, _, _ in entrances],
+            mode="markers", name="已录入入口",
+            marker=dict(size=12, color=[item[5] for item in entrances],
+                        symbol=[item[6] for item in entrances],
+                        line=dict(color=[item[5] for item in entrances], width=2)),
+            customdata=[[0, row, col, "入口", place, entry_name, status]
+                        for place, entry_name, row, col, status, _, _ in entrances],
+            hovertemplate=("%{customdata[4]} · %{customdata[5]}<br>"
+                           "%{customdata[6]} · 行 %{customdata[1]}，列 %{customdata[2]}"
+                           "<br>手动录入，实际情况仍需核实<extra></extra>")))
     x_range,y_range = [0,COLS],[ROWS,0]
     if focus:
         points = [p for p in (start,goal,selected,access_start,access_goal) if p is not None]
@@ -103,7 +180,8 @@ def pdf_map_figure(layout, state, start=None, goal=None, result=None, step=None,
                      constrain="domain", constraintoward="top")
     fig.update_layout(height=900, margin=dict(l=35 if show_grid else 10, r=10,
                                              t=35 if show_grid else 10, b=10), showlegend=False,
-                      plot_bgcolor="white", paper_bgcolor="white", dragmode="pan",
+                      plot_bgcolor="#fffdf7", paper_bgcolor="#fffdf7", dragmode="pan",
+                      clickmode="event+select",
                       hoverlabel=dict(bgcolor="white",font=dict(size=12,color="#334155")),
-                      uirevision="pdf-"+layout["source_hash"]+str((x_range,y_range,focus)))
+                      uirevision="pdf-"+layout["source_hash"]+str((x_range,y_range,focus,view_revision)))
     return fig
