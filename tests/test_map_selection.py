@@ -23,15 +23,15 @@ class MapSelectionTests(unittest.TestCase):
         return session
 
     def test_place_click_sets_named_endpoint(self):
-        ss = self.select("导航","设终点",{"points":[{"customdata":[0,5,5,"建筑","示例建筑"]}]})
+        ss = self.select("导航","设终点",{"points":[{"customdata":[5,5,"建筑","示例建筑"]}]})
         self.assertEqual(ss.nav_goal,"示例建筑")
         self.assertTrue(ss.map_needs_app)
 
     def test_grid_click_fills_marker_or_entrance_without_opening_grid(self):
         for tool,prefix in (("标记位置","_marker"),("入口位置","_entry")):
-            ss = self.select("地点",tool,{"points":[{"customdata":[0,5,5,"网格",""]}]})
+            ss = self.select("地点",tool,{"points":[{"customdata":[5,5,"网格",""]}]})
             self.assertEqual((ss[prefix+"_row"],ss[prefix+"_col"]),(5,5))
-        self.assertEqual(initial_pdf_state(pdf_fixture())["grids"][0][5][5],1)
+        self.assertEqual(initial_pdf_state(pdf_fixture())["grid"][5][5],1)
 
     def test_box_selection_uses_cell_centers_and_clips_bounds(self):
         ss = self.select("维护","框选",{"box":[{"x":[6.9,3.1],"y":[2.9,1.1]}]})

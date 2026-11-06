@@ -99,8 +99,8 @@ def pdf_map_figure(layout, state, start=None, goal=None, result=None, step=None,
             x=[c+.5 for r in range(ROWS) for c in range(COLS)],
             y=[r+.5 for r in range(ROWS) for c in range(COLS)],
             mode="markers", marker=dict(size=7, color="rgba(15,118,110,.025)"),
-            customdata=[[0,r,c,"网格",""] for r in range(ROWS) for c in range(COLS)],
-            hovertemplate="行 %{customdata[1]}，列 %{customdata[2]}<extra></extra>",
+            customdata=[[r,c,"网格",""] for r in range(ROWS) for c in range(COLS)],
+            hovertemplate="行 %{customdata[0]}，列 %{customdata[1]}<extra></extra>",
             name="网格选取", selected=dict(marker=dict(opacity=.25)),
             unselected=dict(marker=dict(opacity=.025))))
     if state["places"]:
@@ -114,7 +114,7 @@ def pdf_map_figure(layout, state, start=None, goal=None, result=None, step=None,
                 highlighted[tuple(point[-2:])] = label, color
         point_colors = [highlighted.get(tuple(p[-2:]),("", "#475569"))[1] for p in points]
         fig.add_trace(go.Scatter(
-            x=[p[2]+.5 for p in points], y=[p[1]+.5 for p in points],
+            x=[p[1]+.5 for p in points], y=[p[0]+.5 for p in points],
             mode="markers+text" if show_building_labels else "markers",
             text=[escape(name) for name in names],
             textposition=_name_positions(points,names,label_cell_pixels) if show_building_labels else "top center",
@@ -126,27 +126,27 @@ def pdf_map_figure(layout, state, start=None, goal=None, result=None, step=None,
                         color=point_colors, symbol="circle",
                         line=dict(color="white",width=1)),
             name="地点位置标记",
-            hovertemplate="%{text} · %{customdata[3]}<br>行 %{customdata[1]}，列 %{customdata[2]}<br>地点中心与导航入口分开<extra></extra>"))
+            hovertemplate="%{text} · %{customdata[2]}<br>行 %{customdata[0]}，列 %{customdata[1]}<br>地点中心与导航入口分开<extra></extra>"))
         if not show_building_labels:
             for name,p in zip(names,points):
                 if tuple(p[-2:]) in highlighted:
                     label,color = highlighted[tuple(p[-2:])]
-                    fig.add_annotation(x=p[2]+.5,y=p[1]+.5,
+                    fig.add_annotation(x=p[1]+.5,y=p[0]+.5,
                         text=escape(label+" · "+name),showarrow=False,yshift=18,
                         font=dict(size=11,color=color),bgcolor="rgba(255,255,255,.94)",
                         bordercolor=color,borderpad=4,
-                        xanchor="left" if p[2]<10 else "right" if p[2]>80 else "center")
+                        xanchor="left" if p[1]<10 else "right" if p[1]>80 else "center")
     entrances = []
     for place, items in state.get("entrances", {}).items():
         if place not in state["places"]:
             continue
         for entry in items:
-            layer, row, col = entry["point"]
-            if layer != 0 or not (0 <= row < ROWS and 0 <= col < COLS):
+            row, col = entry["point"]
+            if not (0 <= row < ROWS and 0 <= col < COLS):
                 continue
             if not entry.get("enabled", True):
                 status, color, symbol = "已停用", "#64748b", "square-open"
-            elif state["grids"][0][row][col] != 0:
+            elif state["grid"][row][col] != 0:
                 status, color, symbol = "道路不可通行", "#b45309", "square"
             else:
                 status, color, symbol = "已启用", "#0f766e", "square"
@@ -159,10 +159,10 @@ def pdf_map_figure(layout, state, start=None, goal=None, result=None, step=None,
             marker=dict(size=12, color=[item[5] for item in entrances],
                         symbol=[item[6] for item in entrances],
                         line=dict(color=[item[5] for item in entrances], width=2)),
-            customdata=[[0, row, col, "入口", place, entry_name, status]
+            customdata=[[row, col, "入口", place, entry_name, status]
                         for place, entry_name, row, col, status, _, _ in entrances],
-            hovertemplate=("%{customdata[4]} · %{customdata[5]}<br>"
-                           "%{customdata[6]} · 行 %{customdata[1]}，列 %{customdata[2]}"
+            hovertemplate=("%{customdata[3]} · %{customdata[4]}<br>"
+                           "%{customdata[5]} · 行 %{customdata[0]}，列 %{customdata[1]}"
                            "<br>手动录入，实际情况仍需核实<extra></extra>")))
     x_range,y_range = [0,COLS],[ROWS,0]
     if focus:

@@ -1,4 +1,4 @@
-"""多层网格 A*：每层上下左右移动，仅在明确的连接点换层。"""
+"""二维网格 A*：上下左右移动，使用曼哈顿距离。"""
 
 from heapq import heappop, heappush
 from itertools import count
@@ -10,43 +10,35 @@ from algorithms.path_result import PathResult
 
 @dataclass(frozen=True)
 class Node:
-    """地图节点；坐标为 (层, 行, 列)。"""
-    layer: int
+    """地图节点；坐标为 (行, 列)。"""
     row: int
     col: int
 
     def neighbors(self):
-        return [(self.layer, self.row - 1, self.col), (self.layer, self.row + 1, self.col),
-                (self.layer, self.row, self.col - 1), (self.layer, self.row, self.col + 1)]
+        return [(self.row - 1, self.col), (self.row + 1, self.col),
+                (self.row, self.col - 1), (self.row, self.col + 1)]
 
 
 class CampusMap:
     """地图负责网格合法性和可通行判断。"""
-    def __init__(self, grids, portals=()):
-        if not isinstance(grids, list) or not grids or not isinstance(grids[0], list) or not grids[0] or not isinstance(grids[0][0], list) or not grids[0][0]:
+    def __init__(self, grid):
+        if not isinstance(grid, list) or not grid or not isinstance(grid[0], list) or not grid[0]:
             raise ValueError("地图不能为空")
-        self.grids = grids
-        self.rows, self.cols = len(grids[0]), len(grids[0][0])
-        if any(not isinstance(g, list) or len(g) != self.rows or any(not isinstance(line, list) or len(line) != self.cols or any(type(v) is not int or v not in (0, 1) for v in line) for line in g) for g in grids):
-            raise ValueError("各层必须是相同大小且只含 0 或 1 的矩形网格")
-        self.links = {}
-        for a, b in portals:
-            a, b = tuple(a), tuple(b)
-            if not self.contains(a) or not self.contains(b) or a[0] == b[0] or a[1:] != b[1:]:
-                raise ValueError("跨层连接必须是同一行列的不同层")
-            if self.walkable(a) and self.walkable(b):
-                self.links.setdefault(a, []).append(b)
-                self.links.setdefault(b, []).append(a)
+        self.grid = grid
+        self.rows, self.cols = len(grid), len(grid[0])
+        if any(not isinstance(line, list) or len(line) != self.cols or
+               any(type(v) is not int or v not in (0, 1) for v in line) for line in grid):
+            raise ValueError("地图必须是只含 0 或 1 的矩形网格")
 
     def contains(self, point):
-        return (isinstance(point, tuple) and len(point) == 3 and all(type(v) is int for v in point)
-                and 0 <= point[0] < len(self.grids) and 0 <= point[1] < self.rows and 0 <= point[2] < self.cols)
+        return (isinstance(point, tuple) and len(point) == 2 and all(type(v) is int for v in point)
+                and 0 <= point[0] < self.rows and 0 <= point[1] < self.cols)
 
     def walkable(self, point):
-        return self.contains(point) and self.grids[point[0]][point[1]][point[2]] == 0
+        return self.contains(point) and self.grid[point[0]][point[1]] == 0
 
     def neighbors(self, point):
-        return [p for p in [*Node(*point).neighbors(), *self.links.get(point, [])] if self.walkable(p)]
+        return [p for p in Node(*point).neighbors() if self.walkable(p)]
 
 
 class PathFinder:
@@ -63,7 +55,7 @@ class PathFinder:
 def _search(campus_map, start, goal):
     started = perf_counter()
     order = count()
-    heuristic = lambda p: abs(p[1] - goal[1]) + abs(p[2] - goal[2])
+    heuristic = lambda p: abs(p[0] - goal[0]) + abs(p[1] - goal[1])
     queue = [(heuristic(start), next(order), 0, start)]
     distances, parents, expanded, visited = {start: 0}, {}, set(), []
     while queue:
@@ -85,6 +77,6 @@ def _search(campus_map, start, goal):
     return PathResult(False, [], visited, len(visited), (perf_counter() - started) * 1000, None)
 
 
-def layered_astar(grids, start, goal, portals=()):
-    """坐标为 (层, 行, 列)；同格跨层代价为 1，曼哈顿距离忽略层数。"""
-    return PathFinder(CampusMap(grids, portals)).search(start, goal)
+def astar(grid, start, goal):
+    """在二维网格上按 (行, 列) 计算最短路线。"""
+    return PathFinder(CampusMap(grid)).search(start, goal)

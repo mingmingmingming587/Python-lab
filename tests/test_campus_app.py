@@ -14,10 +14,10 @@ class CampusAppTests(unittest.TestCase):
         temporary = self.enterContext(tempfile.TemporaryDirectory())
         self.layout = pdf_fixture()
         state = initial_pdf_state(self.layout)
-        state["places"] = {"示例起点": [0,5,5], "示例终点": [0,2,8]}
+        state["places"] = {"示例起点": [5, 5], "示例终点": [2, 8]}
         state["entrances"] = {
-            "示例起点": [{"name":"西门","point":[0,2,2],"enabled":True}],
-            "示例终点": [{"name":"入口","point":[0,2,8],"enabled":True}],
+            "示例起点": [{"name":"西门","point":[2, 2],"enabled":True}],
+            "示例终点": [{"name":"入口","point":[2, 8],"enabled":True}],
         }
         self.service = CampusMapService(state, Path(temporary) / "pdf.db")
         self.enterContext(patch("visualization.workspace.open_pdf_project", side_effect=lambda: (self.layout, self.service, *self.service.load())))
@@ -52,8 +52,8 @@ class CampusAppTests(unittest.TestCase):
         next(s for s in edit.selectbox if s.label == "调整分类").select(3)
         next(b for b in edit.button if b.label == "保存网格修改").click().run()
         self.assertFalse(edit.exception)
-        self.assertEqual(self.service.load()[1]["grids"][0][2][5], 1)
-        self.assertEqual(self.service.history()[0]["snapshot"]["grids"][0][2][5], 0)
+        self.assertEqual(self.service.load()[1]["grid"][2][5], 1)
+        self.assertEqual(self.service.history()[0]["snapshot"]["grid"][2][5], 0)
         next(b for b in nav.button if b.label == "开始 A* 搜索").click().run()
         self.assertFalse(nav.exception)
         self.assertFalse(self.service.history()[0]["found"])
@@ -71,7 +71,7 @@ class CampusAppTests(unittest.TestCase):
 
     def test_unavailable_named_entrance_does_not_save_invalid_route(self):
         revision, state = self.service.load()
-        state["grids"][0][2][2] = 1
+        state["grid"][2][2] = 1
         self.service.save(state, revision)
         nav = self.page("navigation.py")
         self.assertTrue(any("没有当前可用的已指定入口" in e.value for e in nav.error))
@@ -86,8 +86,8 @@ class CampusAppTests(unittest.TestCase):
         next(b for b in edit.button if b.label == "保存地点标记").click().run()
         self.assertFalse(edit.exception)
         state = self.service.load()[1]
-        self.assertEqual(state["places"]["示例建筑"], [0, 5, 5])
-        self.assertEqual(state["grids"][0][5][5], 1)
+        self.assertEqual(state["places"]["示例建筑"], [5, 5])
+        self.assertEqual(state["grid"][5][5], 1)
         refreshed = self.page("map_management.py")
         self.assertFalse(refreshed.exception)
 
@@ -140,11 +140,11 @@ class CampusAppTests(unittest.TestCase):
         self.assertFalse(edit.exception)
         saved = self.service.load()[1]
         self.assertEqual(saved["classes"][2][4:7],[3,3,3])
-        self.assertEqual(saved["grids"][0][2][4:7],[1,1,1])
-        self.assertEqual(self.service.history()[0]["snapshot"]["grids"][0][2][4:7],[0,0,0])
+        self.assertEqual(saved["grid"][2][4:7],[1,1,1])
+        self.assertEqual(self.service.history()[0]["snapshot"]["grid"][2][4:7],[0, 0, 0])
         next(b for b in edit.button if b.label=="撤销上次修改").click().run()
         self.assertFalse(edit.exception)
-        self.assertEqual(self.service.load()[1]["grids"][0][2][4:7],[0,0,0])
+        self.assertEqual(self.service.load()[1]["grid"][2][4:7],[0, 0, 0])
         self.assertTrue(next(b for b in edit.button if b.label=="撤销上次修改").disabled)
 
     def test_undo_does_not_overwrite_another_session(self):
@@ -153,11 +153,11 @@ class CampusAppTests(unittest.TestCase):
         next(b for b in edit.button if b.label=="保存网格修改").click().run()
         revision,state = self.service.load()
         state["classes"][1][1] = 2
-        state["grids"][0][1][1] = 0
+        state["grid"][1][1] = 0
         self.service.save(state,revision)
         next(b for b in edit.button if b.label=="撤销上次修改").click().run()
         self.assertTrue(any("其他会话" in e.value for e in edit.error))
-        self.assertEqual(self.service.load()[1]["grids"][0][1][1],0)
+        self.assertEqual(self.service.load()[1]["grid"][1][1],0)
 
     def test_search_playback_does_not_repeat_query(self):
         nav = self.page("navigation.py")

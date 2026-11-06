@@ -105,9 +105,9 @@ def _load_pdf_map(path, modified, size):
 def initial_pdf_state(layout):
     classes = deepcopy(layout["classes"])
     grid = [[0 if value == 2 else 1 for value in row] for row in classes]
-    state = {"grids": [grid], "classes": classes, "places": {}, "place_status": {},
+    state = {"grid": grid, "classes": classes, "places": {}, "place_status": {},
             "place_kinds": {}, "entrances": {},
-            "portals": [], "north_gate_open": False, "source": layout["source"],
+            "source": layout["source"],
             "source_hash": layout["source_hash"], "map_version": "integrated-180x90"}
     merge_building_markers(state, layout)
     return state
@@ -123,7 +123,7 @@ def merge_building_markers(state, layout):
         kind = marker.get("kind", "建筑")
         allowed = (0, 1, 2) if kind == "场地" else (1,)
         if name not in state["places"] and state["classes"][row][col] in allowed:
-            state["places"][name] = [0, row, col]
+            state["places"][name] = [row, col]
             state["place_status"][name] = "PDF 图面定位；" + marker["note"]
         if name in state["places"]:
             state.setdefault("place_kinds", {}).setdefault(name, kind)
@@ -151,7 +151,7 @@ def set_building_marker(state, name, row, col, *, old_name=None, kind="建筑"):
         state.setdefault("place_kinds", {}).pop(old_name, None)
         if old_name in state.get("entrances", {}):
             state["entrances"][name] = state["entrances"].pop(old_name)
-    state["places"][name] = [0, row, col]
+    state["places"][name] = [row, col]
     state.setdefault("place_kinds", {})[name] = kind
     state["place_status"][name] = "手动地点标记"
 
@@ -161,14 +161,14 @@ def set_place_entrance(state, place, name, row, col, *, enabled=True, old_name=N
     name = name.strip()
     if place not in state["places"] or not name:
         raise ValueError("请选择地点，并填写入口名称")
-    if not (0 <= row < ROWS and 0 <= col < COLS) or state["grids"][0][row][col] != 0:
+    if not (0 <= row < ROWS and 0 <= col < COLS) or state["grid"][row][col] != 0:
         raise ValueError("入口必须位于可通行道路格")
     entries = state.setdefault("entrances", {}).setdefault(place, [])
     if any(e["name"] == name and e["name"] != old_name for e in entries):
         raise ValueError("入口名称已存在，请选择已有入口修改")
     if old_name:
         entries[:] = [e for e in entries if e["name"] != old_name]
-    entries.append({"name": name, "point": [0, row, col], "enabled": bool(enabled)})
+    entries.append({"name": name, "point": [row, col], "enabled": bool(enabled)})
 
 
 def set_grid_region(state, bounds, classification):
@@ -182,7 +182,7 @@ def set_grid_region(state, bounds, classification):
     for row in range(r1, r2+1):
         for col in range(c1, c2+1):
             state["classes"][row][col] = classification
-            state["grids"][0][row][col] = 0 if classification == 2 else 1
+            state["grid"][row][col] = 0 if classification == 2 else 1
 
 
 def open_pdf_project(pdf_path=PDF_PATH, db_path=PDF_DB_PATH):

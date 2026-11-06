@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 @dataclass
 class PathResult:
-    """一次搜索的结果；单层坐标为 (row, col)，分层坐标为 (layer, row, col)。"""
+    """一次搜索的结果；坐标为 (row, col)。"""
 
     found: bool
     path: list[tuple[int, ...]]

@@ -8,18 +8,18 @@ from tests.test_pdf_map import pdf_fixture
 class PlaceNavigationTests(unittest.TestCase):
     def setUp(self):
         self.state = initial_pdf_state(pdf_fixture())
-        self.state["places"] = {"起点建筑":[0,5,5], "终点建筑":[0,2,8]}
+        self.state["places"] = {"起点建筑":[5, 5], "终点建筑":[2, 8]}
 
     def test_temporary_access_is_explicit_and_does_not_open_building(self):
-        original = [line[:] for line in self.state["grids"][0]]
+        original = [line[:] for line in self.state["grid"]]
         accesses = access_points(self.state,"起点建筑")
         self.assertTrue(accesses[0]["temporary"])
-        self.assertEqual(accesses[0]["point"],[0,2,5])
+        self.assertEqual(accesses[0]["point"],[2, 5])
         result,start,goal = plan_named_route(self.state,"起点建筑","终点建筑")
         self.assertTrue(result.found)
         self.assertEqual(result.path_length,3)
-        self.assertNotIn((0,5,5),result.path)
-        self.assertEqual(self.state["grids"][0],original)
+        self.assertNotIn((5, 5),result.path)
+        self.assertEqual(self.state["grid"],original)
 
     def test_multiple_entrances_choose_shortest_or_honor_selection(self):
         set_place_entrance(self.state,"起点建筑","西门",2,2)
@@ -42,12 +42,12 @@ class PlaceNavigationTests(unittest.TestCase):
 
     def test_field_marker_does_not_make_the_field_walkable(self):
         set_building_marker(self.state,"运动场",10,10,kind="场地")
-        self.assertEqual(self.state["places"]["运动场"],[0,10,10])
+        self.assertEqual(self.state["places"]["运动场"],[10, 10])
         self.assertEqual(self.state["place_kinds"]["运动场"],"场地")
-        self.assertEqual(self.state["grids"][0][10][10],1)
+        self.assertEqual(self.state["grid"][10][10],1)
         set_building_marker(self.state,"分类图涂黄的网球场",5,5,kind="场地")
         self.assertEqual(self.state["classes"][5][5],1)
-        self.assertEqual(self.state["grids"][0][5][5],1)
+        self.assertEqual(self.state["grid"][5][5],1)
 
 
 if __name__=="__main__":

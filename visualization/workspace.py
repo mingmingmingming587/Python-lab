@@ -64,12 +64,12 @@ def _map_selected():
         ss._edit_row, ss._edit_col = r1,c1
     elif points:
         data = points[-1].get("customdata", [])
-        if len(data) < 3:
+        if len(data) < 2:
             return
-        row, col = int(data[1]), int(data[2])
+        row, col = int(data[0]), int(data[1])
         if not (0 <= row < ROWS and 0 <= col < COLS):
             return
-        name = data[4] if len(data) > 4 else ""
+        name = data[3] if len(data) > 3 else ""
         if ss.workspace_mode == "导航" and name:
             if ss.map_tool == "设起点":
                 ss.nav_start, ss.nav_gate_start = name, None
@@ -108,7 +108,7 @@ def _save(service, revision, before, edited, label):
 
 
 def _header(state, revision):
-    roads = sum(v == 0 for line in state["grids"][0] for v in line)
+    roads = sum(v == 0 for line in state["grid"] for v in line)
     st.html(Path(__file__).with_name("workspace.css").read_text(encoding="utf-8"))
     st.html(f'''<header class="campus-header">
       <div class="campus-brand"><span class="campus-logo">CP</span>
@@ -225,11 +225,11 @@ def _places(state, service, revision):
                  args=("_place_select","selected_place"))
     ss.selected_place = selected
     old_name = None if selected=="新增地点标记" else selected
-    point = state["places"].get(selected,[0,0,0])
+    point = state["places"].get(selected,[0,0])
     if ss.get("marker_for") != selected or "_marker_name" not in ss:
         ss.marker_for = selected
         ss._marker_name = old_name or ""
-        ss._marker_row, ss._marker_col = point[1:]
+        ss._marker_row, ss._marker_col = point
         ss._marker_kind = state.get("place_kinds",{}).get(selected,"建筑")
     st.caption("地点圆点可以放在建筑内部；入口单独设置在道路上。")
     with st.form("place_marker"):
@@ -248,7 +248,7 @@ def _places(state, service, revision):
             else:
                 ss.selected_place = ss._marker_name.strip()
                 _save(service,revision,state,edited,"地点标记已更新")
-    selected_point = [0,ss._marker_row,ss._marker_col]
+    selected_point = [ss._marker_row,ss._marker_col]
     if old_name:
         with st.expander("导航入口：新增或修改",expanded=True):
             entries = state.get("entrances",{}).get(old_name,[])
@@ -260,7 +260,7 @@ def _places(state, service, revision):
             if ss.get("entry_for") != identity or "_entry_name" not in ss:
                 ss.entry_for = identity
                 ss._entry_name = entry["name"] if entry else ""
-                ss._entry_row,ss._entry_col = (entry["point"] if entry else point)[1:]
+                ss._entry_row,ss._entry_col = entry["point"] if entry else point
                 ss._entry_enabled = entry.get("enabled",True) if entry else True
             with st.form("place_entry"):
                 st.text_input("入口名称",key="_entry_name",placeholder="例如：南门、北门")
@@ -279,7 +279,7 @@ def _places(state, service, revision):
                         _save(service,revision,state,edited,"导航入口已更新")
             st.caption("入口必须位于道路格。可维护多个入口，停用后不参与导航。")
             if ss.map_tool == "入口位置":
-                selected_point = [0,ss._entry_row,ss._entry_col]
+                selected_point = [ss._entry_row,ss._entry_col]
     return {"selected":selected_point}
 
 
@@ -347,14 +347,14 @@ def _maintenance(state, service, revision):
     with st.expander("道路信息核查",expanded=True):
         counts = Counter(v for line in state["classes"] for v in line)
         st.dataframe([{"分类":CLASS_NAMES[i],"格子数":counts[i]} for i in range(4)],hide_index=True,width="stretch")
-        components = road_components(state["grids"][0])
+        components = road_components(state["grid"])
         st.write("四方向道路连通区域：",len(components))
         st.dataframe([{"区域":i+1,"道路格数":len(c)} for i,c in enumerate(components)],hide_index=True,width="stretch")
     with st.expander("地图来源与使用范围"):
         st.write("来源：reference/campus-map-integrated.pdf")
         st.write("第 2 页分类与第 3 页道路网格逐格核对。")
         st.warning("当前为平面网格，不含已核实的天桥跨层关系。路线用于课程与图面校对，不能作为实地导航依据。")
-    return {"selected":[0,row,col],"selection_bounds":bounds}
+    return {"selected":[row,col],"selection_bounds":bounds}
 
 
 def render_workspace(default_mode="导航"):
@@ -370,6 +370,11 @@ def render_workspace(default_mode="导航"):
                 "nav_gate_start":None,"nav_gate_goal":None,"map_scale":"清晰浏览"}
     for key,value in defaults.items():
         ss.setdefault(key,value)
+    if not ss.get("coordinates_2d_applied"):
+        # 旧浏览器会话中的路线仍可能使用三维坐标，需重新查询。
+        ss.pop("nav_route", None)
+        ss.playing = False
+        ss.coordinates_2d_applied = True
     if not ss.get("map_text_defaults_applied"):
         # 为已经打开的旧会话恢复文字；之后仍尊重使用者手动切换的选项。
         ss.show_background = ss.show_labels = True

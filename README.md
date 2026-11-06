@@ -56,10 +56,10 @@
 | `visualization/pdf_map.py` | PDF 图面对齐、分类格子、路径与建筑标记显示 |
 | `visualization/workspace.py`、`visualization/workspace.css` | 共用工作台、选择联动、搜索播放及界面样式 |
 | `algorithms/place_navigation.py` | 名称查询、入口选择和临时接入点 |
-| `algorithms/layered_astar.py` | 自主实现的 A*；当前传入单层网格，不设置跨层连接 |
+| `algorithms/layered_astar.py` | 自主实现的二维 A*，使用 `(行, 列)` 坐标 |
 | `database/campus_project.py` | 复用地图版本检查、SQLite 保存与历史快照 |
 | `pages/navigation.py`、`pages/map_management.py`、`pages/route_history.py`、`pages/road_review.py` | 保留原访问地址，进入对应的工作台模式 |
-| `note/新PDF地图.md` | 本次地图替换和建筑标记说明 |
+| `docs/新PDF地图.md` | 地图数据、接口、入口和工作台说明 |
 
 运行检查：
 
