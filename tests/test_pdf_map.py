@@ -27,6 +27,19 @@ def pdf_fixture():
 
 
 class PDFMapTests(unittest.TestCase):
+    def test_edited_cells_cover_the_pdf_without_shading_the_selection(self):
+        layout = pdf_fixture()
+        state = initial_pdf_state(layout)
+        state["classes"][2][2:4] = [1, 3]
+        state["grid"][2][2:4] = [1, 1]
+        fig = pdf_map_figure(layout, state, show_background=True,
+                             selected=[2, 2], selection_bounds=(2, 2, 2, 3))
+        base, changed = fig.data
+        self.assertEqual(base.opacity, .25)
+        self.assertEqual(changed.opacity, 1)
+        self.assertEqual(tuple(changed.z[2][2:5]), (1, 3, None))
+        self.assertEqual(fig.layout.shapes[0].fillcolor, "rgba(0,0,0,0)")
+
     def test_building_marker_inside_building_does_not_open_grid(self):
         state = initial_pdf_state(pdf_fixture())
         set_building_marker(state, "示例建筑", 5, 5)

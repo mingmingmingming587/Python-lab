@@ -68,15 +68,24 @@ def pdf_map_figure(layout, state, start=None, goal=None, result=None, step=None,
     scale = []
     for i, color in enumerate(COLORS):
         scale.extend([[i/4, color], [(i+1)/4, color]])
+    x, y = [c+.5 for c in range(COLS)], [r+.5 for r in range(ROWS)]
+    gap = 1 if show_grid else 0
     fig.add_trace(go.Heatmap(
-        x=[c+.5 for c in range(COLS)], y=[r+.5 for r in range(ROWS)],
+        x=x, y=y,
         z=state["classes"], zmin=-.5, zmax=3.5, colorscale=scale,
         text=[[CLASS_NAMES[v] for v in row] for row in state["classes"]],
         customdata=[[[r, c] for c in range(COLS)] for r in range(ROWS)],
         hovertemplate="%{text} · 行 %{customdata[0]}，列 %{customdata[1]}<extra></extra>",
-        xgap=1 if show_grid else 0, ygap=1 if show_grid else 0,
+        xgap=gap, ygap=gap,
         opacity=.25 if show_background else 1,
         showscale=False, name="PDF 分类"))
+    if show_background and state["classes"] != layout["classes"]:
+        changed = [[cell if cell != original else None for cell, original in zip(row, source_row)]
+                   for row, source_row in zip(state["classes"], layout["classes"])]
+        fig.add_trace(go.Heatmap(
+            x=x, y=y, z=changed, zmin=-.5, zmax=3.5, colorscale=scale,
+            xgap=gap, ygap=gap, opacity=1, hoverinfo="skip", hoverongaps=False,
+            showscale=False, name="已修改格子"))
     if result:
         count = result.expanded_count if step is None else step
         if show_visited:
@@ -84,15 +93,15 @@ def pdf_map_figure(layout, state, start=None, goal=None, result=None, step=None,
         if result.found and count == result.expanded_count:
             _overlay(fig, result.path, "A* 路径", "#2563eb", show_grid)
     for point, name, color in ((start, "起点", "#087f23"), (goal, "终点", "#be123c"),
-                               (selected, "所选格子", "#9333ea"),
+                               (selected if not selection_bounds else None, "所选格子", "#9333ea"),
                                (access_start, "起点道路接入", "#0d9488"),
                                (access_goal, "终点道路接入", "#db2777")):
         if point is not None:
             _overlay(fig, [point], name, color, show_grid)
     if selection_bounds:
         r1, c1, r2, c2 = selection_bounds
-        _overlay(fig, [(r, c) for r in range(r1, r2+1) for c in range(c1, c2+1)],
-                 "待修改选区", "rgba(139,92,246,.45)", show_grid)
+        fig.add_shape(type="rect", x0=c1, y0=r1, x1=c2+1, y1=r2+1,
+                      line=dict(color="#9333ea", width=2), fillcolor="rgba(0,0,0,0)")
     if selectable_cells:
         # 热力图不提供原生点选；仅在编辑时增加可选择的格心散点层。
         fig.add_trace(go.Scattergl(

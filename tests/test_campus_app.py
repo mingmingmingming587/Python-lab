@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -5,7 +6,7 @@ from unittest.mock import patch
 
 from streamlit.testing.v1 import AppTest
 from database.campus_project import CampusMapService
-from database.pdf_map import initial_pdf_state
+from database.pdf_map import MAP_JSON_FORMAT, initial_pdf_state
 from tests.test_pdf_map import pdf_fixture
 
 
@@ -196,6 +197,43 @@ class CampusAppTests(unittest.TestCase):
             self.assertTrue(next(b for b in edit.button if b.label=="保存地图").disabled)
             self.assertEqual(self.service.load()[1]["grid"][1][1],0)
         self.assertNotIn("map_draft", edit.session_state)
+
+    def test_import_and_restore_are_undoable_draft_edits(self):
+        nav = self.page("navigation.py")
+        next(b for b in nav.button if b.label == "开始 A* 搜索").click().run()
+        history = self.service.history()
+        before = self.service.load()
+        edited = self.service.load()[1]
+        edited["classes"][2][2] = 3
+        # A blocked entrance stays recorded. The imported grid comes from classes.
+        edit = self.page("road_review.py")
+        edit.file_uploader[0].set_value(("broken.json", b"{}", "application/json")).run()
+        next(b for b in edit.button if b.label == "导入 JSON 地图").click().run()
+        self.assertTrue(edit.error)
+        self.assertNotIn("map_draft", edit.session_state)
+
+        content = json.dumps({"format": MAP_JSON_FORMAT, "state": edited}).encode("utf-8")
+        edit.file_uploader[0].set_value(("campus-map.json", content, "application/json")).run()
+        next(b for b in edit.button if b.label == "导入 JSON 地图").click().run()
+        self.assertFalse(edit.error)
+        draft = edit.session_state["map_draft"]
+        self.assertEqual(draft["state"]["grid"][2][2], 1)
+        self.assertEqual(draft["state"]["entrances"], edited["entrances"])
+        next(b for b in edit.button if b.label == "后退").click().run()
+        self.assertEqual(draft["state"], before[1])
+        next(b for b in edit.button if b.label == "前进").click().run()
+        self.assertEqual(draft["state"]["grid"][2][2], 1)
+
+        next(b for b in edit.button if b.label == "恢复初始地图").click().run()
+        initial = initial_pdf_state(self.layout)
+        self.assertEqual(draft["state"], initial)
+        next(b for b in edit.button if b.label == "后退").click().run()
+        self.assertEqual(draft["state"]["grid"][2][2], 1)
+        next(b for b in edit.button if b.label == "前进").click().run()
+        self.assertEqual(self.service.load(), before)
+        next(b for b in edit.button if b.label == "保存地图").click().run()
+        self.assertEqual(self.service.load(), (before[0]+1, initial))
+        self.assertEqual(self.service.history(), history)
 
     def test_search_playback_does_not_repeat_query(self):
         nav = self.page("navigation.py")

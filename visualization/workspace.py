@@ -10,7 +10,8 @@ import streamlit as st
 
 from algorithms.path_result import PathResult
 from algorithms.place_navigation import access_points, plan_named_route
-from database.pdf_map import (CLASS_NAMES, COLS, ROWS, open_pdf_project,
+from database.pdf_map import (CLASS_NAMES, COLS, MAP_JSON_FORMAT, ROWS, import_map_json,
+                              initial_pdf_state, open_pdf_project,
                               road_components, set_building_marker,
                               set_grid_region, set_place_entrance)
 from visualization.pdf_map import pdf_map_figure
@@ -377,7 +378,7 @@ def _history(state, service):
                   "access_start":a["point"] if a else None,"access_goal":b["point"] if b else None}
 
 
-def _maintenance(state, revision):
+def _maintenance(layout, state, revision):
     ss = st.session_state
     st.subheader("地图维护")
     st.caption("点选一个格子，或框选一片区域，再把分类应用到草稿。")
@@ -397,8 +398,26 @@ def _maintenance(state, revision):
             set_grid_region(edited,bounds,classification)
             _stage_edit(revision,state,edited)
     st.caption("仅道路格可通行。框选只预览选区。")
-    st.download_button("导出当前地图 JSON",json.dumps({"format":"campuspath-integrated-1","state":state},ensure_ascii=False,indent=2),
-                       file_name="campus-map.json",mime="application/json",width="stretch")
+    with st.expander("导入、导出与恢复地图"):
+        st.caption("导入和恢复会替换当前草稿，可用 Ctrl+Z 撤销。保存地图后生效。")
+        uploaded = st.file_uploader("选择地图 JSON", type="json", max_upload_size=2)
+        if st.button("导入 JSON 地图", disabled=uploaded is None, width="stretch"):
+            try:
+                imported = import_map_json(uploaded.getvalue(), layout)
+            except ValueError as error:
+                st.error(str(error))
+            else:
+                if imported == state:
+                    st.info("导入的地图与当前地图一致。")
+                _stage_edit(revision, state, imported)
+        if st.button("恢复初始地图", width="stretch"):
+            initial = initial_pdf_state(layout)
+            if initial == state:
+                st.info("当前地图已是初始版本。")
+            _stage_edit(revision, state, initial)
+        st.download_button("导出当前地图 JSON",
+                           json.dumps({"format": MAP_JSON_FORMAT, "state": state}, ensure_ascii=False, indent=2),
+                           file_name="campus-map.json", mime="application/json", width="stretch")
     with st.expander("道路信息核查",expanded=True):
         counts = Counter(v for line in state["classes"] for v in line)
         st.dataframe([{"分类":CLASS_NAMES[i],"格子数":counts[i]} for i in range(4)],hide_index=True,width="stretch")
@@ -472,7 +491,7 @@ def render_workspace(default_mode="导航"):
             elif mode=="历史":
                 display_state,view = _history(state,service)
             else:
-                view = _maintenance(display_state,revision)
+                view = _maintenance(layout,display_state,revision)
     with map_panel:
         with st.container(height=780,border=True,key="workspace_map_panel"):
             tools_col,options_col = st.columns([3,2],vertical_alignment="center")

@@ -18,6 +18,8 @@ PDF_PATH = ROOT / "reference" / "campus-map-integrated.pdf"
 PDF_DB_PATH = ROOT / "data" / "campuspath-integrated.db"
 BUILDING_MARKERS_PATH = ROOT / "reference" / "building-markers.json"
 ROWS, COLS = 180, 90
+MAP_JSON_FORMAT = "campuspath-integrated-1"
+MAP_VERSION = "integrated-180x90"
 CLASS_NAMES = ("未标注", "建筑", "道路", "边界")
 EXPECTED_COUNTS = {0: 10491, 1: 2689, 2: 2227, 3: 793}
 # 此 PDF 嵌入的是 2480×3508 图片。以下为图面网格的像素原点和步长。
@@ -105,12 +107,75 @@ def _load_pdf_map(path, modified, size):
 def initial_pdf_state(layout):
     classes = deepcopy(layout["classes"])
     grid = [[0 if value == 2 else 1 for value in row] for row in classes]
-    state = {"grid": grid, "classes": classes, "places": {}, "place_status": {},
+    state = {"name": "校园地图", "grid": grid, "classes": classes, "places": {}, "place_status": {},
             "place_kinds": {}, "entrances": {},
             "source": layout["source"],
-            "source_hash": layout["source_hash"], "map_version": "integrated-180x90"}
+             "source_hash": layout["source_hash"], "map_version": MAP_VERSION}
     merge_building_markers(state, layout)
     return state
+
+
+def _valid_map_point(point):
+    return (isinstance(point, list) and len(point) == 2
+            and all(type(value) is int for value in point)
+            and 0 <= point[0] < ROWS and 0 <= point[1] < COLS)
+
+
+def import_map_json(data, layout):
+    """读取本项目导出的地图，校验完整内容后生成可编辑草稿。"""
+    try:
+        export = json.loads(data)
+    except (ValueError, RecursionError) as error:
+        raise ValueError("无法读取地图 JSON，请选择本项目导出的文件。") from error
+    if not isinstance(export, dict) or export.get("format") != MAP_JSON_FORMAT:
+        raise ValueError("地图 JSON 格式不受支持。")
+    state = export.get("state")
+    if not isinstance(state, dict) or (state.get("source_hash"), state.get("map_version")) != (
+        layout["source_hash"], MAP_VERSION
+    ):
+        raise ValueError("地图 JSON 与当前 PDF 或网格版本不一致。")
+    classes = state.get("classes")
+    if not isinstance(classes, list) or len(classes) != ROWS or any(
+        not isinstance(row, list) or len(row) != COLS
+        or any(type(cell) is not int or cell not in range(len(CLASS_NAMES)) for cell in row)
+        for row in classes
+    ):
+        raise ValueError(f"地图分类网格必须为 {ROWS} 行 × {COLS} 列，分类值为 0～3。")
+
+    places = state.get("places")
+    if not isinstance(places, dict) or any(
+        not name.strip() or not _valid_map_point(point) for name, point in places.items()
+    ):
+        raise ValueError("地图 JSON 包含无效的地点名称或坐标。")
+    kinds, statuses = state.get("place_kinds", {}), state.get("place_status", {})
+    if (not isinstance(kinds, dict) or kinds.keys() - places.keys()
+            or any(kind not in ("建筑", "场地") for kind in kinds.values())
+            or not isinstance(statuses, dict) or statuses.keys() - places.keys()
+            or any(not isinstance(status, str) for status in statuses.values())):
+        raise ValueError("地图 JSON 包含无效的地点类型或状态。")
+
+    entrances = state.get("entrances", {})
+    if not isinstance(entrances, dict) or entrances.keys() - places.keys():
+        raise ValueError("地图 JSON 包含未关联地点的入口。")
+    for place, entries in entrances.items():
+        if not isinstance(entries, list):
+            raise ValueError(f"入口列表无效：{place}")
+        names = set()
+        for entry in entries:
+            name = entry.get("name") if isinstance(entry, dict) else None
+            if (not isinstance(name, str) or not name.strip() or name in names
+                    or not _valid_map_point(entry.get("point"))
+                    or type(entry.get("enabled")) is not bool):
+                raise ValueError(f"入口名称、坐标或启用状态无效：{place}")
+            names.add(name)
+
+    result = initial_pdf_state(layout)
+    name = state.get("name", result["name"])
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("地图名称无效。")
+    result.update(name=name, classes=classes, grid=[[0 if cell == 2 else 1 for cell in row] for row in classes],
+                  places=places, place_kinds=kinds, place_status=statuses, entrances=entrances)
+    return result
 
 
 def merge_building_markers(state, layout):
