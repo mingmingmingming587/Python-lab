@@ -40,7 +40,7 @@
 .campus-legend span { display:inline-flex; align-items:center; gap:4px; }
 .campus-legend i { display:inline-block; height:9px; width:9px; border-radius:2px; }
 .legend-building { background:#ead39b; }.legend-road { background:#a6d5bd; }.legend-boundary { background:#e6afb1; }.legend-route { background:#2563eb; }
-.legend-entrance { background:#0f766e; }.legend-entrance-blocked { background:#b45309; }.legend-entrance-disabled { border:2px solid #64748b; }
+.legend-entrance { background:#0f766e; }.legend-entrance-inferred { border:2px solid #0f766e; }.legend-entrance-blocked { background:#b45309; }.legend-entrance-disabled { border:2px solid #64748b; }
 .campus-legend .legend-note { margin-left:auto; color:#9b9f94; }
 @media(max-width:1100px) { .campus-stats span { padding:6px; }.campus-stats { gap:5px; }.campus-legend .legend-note { display:none; } }
 @media(max-width:800px) { .stMainBlockContainer { padding:.6rem; }.campus-header { padding:13px; gap:10px; }.campus-stats { display:none; }.campus-brand h1 { font-size:18px; }.campus-logo { width:36px; height:36px; }.st-key-workspace_controls,.st-key-workspace_map_panel { height:650px!important; min-height:0; } }

@@ -75,6 +75,32 @@ class LegacyDataTests(unittest.TestCase):
             raw = json.loads(conn.execute("SELECT data FROM campus_project WHERE id=1").fetchone()[0])
         self.assertEqual(raw, self.legacy)
 
+    def test_existing_five_table_database_adds_source_without_losing_entries(self):
+        service = CampusMapService(self.initial, self.db)
+        before = service.load()
+        history = service.history()
+        for old_version in (0, 1):
+            with self.subTest(version=old_version):
+                with closing(sqlite3.connect(self.db)) as conn, conn:
+                    conn.execute("ALTER TABLE place_entrances DROP COLUMN source")
+                    conn.execute(f"PRAGMA user_version = {old_version}")
+                reopened = CampusMapService(self.initial, self.db)
+                self.assertEqual(reopened.load(), before)
+                self.assertEqual(reopened.history(), history)
+                self.assertEqual(CampusMapService(self.initial, self.db).load(), before)
+                with closing(sqlite3.connect(self.db)) as conn:
+                    self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 2)
+                    self.assertEqual({row[0] for row in conn.execute("SELECT source FROM place_entrances")}, {"manual"})
+
+    def test_inferred_entry_source_survives_save_and_reopen(self):
+        service = CampusMapService(self.initial, self.db)
+        _, state = service.load()
+        state["entrances"]["图书馆"][0]["source"] = "map_inferred"
+        service.save(state)
+        loaded = CampusMapService(self.initial, self.db).load()[1]
+        self.assertEqual(loaded["entrances"], state["entrances"])
+        self.assertNotIn("source", loaded["entrances"]["图书馆"][1])
+
     def test_migration_rolls_back_if_a_late_insert_fails(self):
         self.legacy["entrances"]["图书馆"].append(self.legacy["entrances"]["图书馆"][0])
         with closing(sqlite3.connect(self.db)) as conn, conn:

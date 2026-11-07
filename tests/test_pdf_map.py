@@ -1,5 +1,6 @@
 from collections import Counter
 from io import BytesIO
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -10,7 +11,8 @@ from PIL import Image
 from algorithms.astar import astar
 from database.pdf_map import (PDF_PATH, ROWS, COLS, EXPECTED_COUNTS, load_pdf_map,
                               initial_pdf_state, open_pdf_project, road_components,
-                              set_building_marker, merge_building_markers)
+                              set_building_marker, merge_building_markers, merge_place_entrances,
+                              set_place_entrance, import_map_json, MAP_JSON_FORMAT)
 from visualization.pdf_map import pdf_map_figure
 
 
@@ -27,18 +29,34 @@ def pdf_fixture():
 
 
 class PDFMapTests(unittest.TestCase):
-    def test_edited_cells_cover_the_pdf_without_shading_the_selection(self):
+    def test_classification_changes_use_one_consistent_color_layer(self):
         layout = pdf_fixture()
         state = initial_pdf_state(layout)
+        original = pdf_map_figure(layout, state, show_background=True)
         state["classes"][2][2:4] = [1, 3]
         state["grid"][2][2:4] = [1, 1]
         fig = pdf_map_figure(layout, state, show_background=True,
                              selected=[2, 2], selection_bounds=(2, 2, 2, 3))
-        base, changed = fig.data
-        self.assertEqual(base.opacity, .25)
-        self.assertEqual(changed.opacity, 1)
-        self.assertEqual(tuple(changed.z[2][2:5]), (1, 3, None))
+        self.assertEqual(len(fig.data), 1)
+        base = fig.data[0]
+        self.assertEqual(base.colorscale, original.data[0].colorscale)
+        self.assertEqual(base.opacity, original.data[0].opacity)
+        self.assertEqual(base.opacity, .55)
+        self.assertEqual(base.colorscale[0][1], "rgba(0,0,0,0)")
+        self.assertEqual(base.colorscale[1][1], "rgba(0,0,0,0)")
+        self.assertEqual(tuple(base.z[2][2:5]), (1, 3, 2))
+        self.assertEqual(layout["classes"][2][2:4], [2, 2])
         self.assertEqual(fig.layout.shapes[0].fillcolor, "rgba(0,0,0,0)")
+
+    def test_review_highlights_and_focuses_without_changing_classification(self):
+        layout = pdf_fixture()
+        state = initial_pdf_state(layout)
+        reviewed = [(2, 2), (2, 3)]
+        fig = pdf_map_figure(layout, state, review_cells=reviewed)
+        self.assertEqual(fig.data[1].name, "核查道路区域")
+        self.assertEqual(tuple(fig.data[1].z[2][2:5]), (1, 1, None))
+        self.assertEqual(list(fig.layout.xaxis.range), [0, 12])
+        self.assertEqual(state["classes"], layout["classes"])
 
     def test_building_marker_inside_building_does_not_open_grid(self):
         state = initial_pdf_state(pdf_fixture())
@@ -51,7 +69,7 @@ class PDFMapTests(unittest.TestCase):
             set_building_marker(state, "边界上的建筑", 6, 6)
 
     @unittest.skipUnless(PDF_PATH.exists(), "需要本机参考 PDF")
-    def test_pdf_extraction_and_building_points_stay_inside_buildings(self):
+    def test_initial_grid_and_building_points_stay_inside_buildings(self):
         layout = load_pdf_map()
         self.assertEqual(Counter(v for row in layout["classes"] for v in row), EXPECTED_COUNTS)
         state = initial_pdf_state(layout)
@@ -105,6 +123,54 @@ class PDFMapTests(unittest.TestCase):
             self.assertEqual(updated_revision, revision+1)
             self.assertEqual(updated["places"]["示例建筑"], [5, 5])
             self.assertEqual(open_pdf_project(db_path=db)[2], updated_revision)
+
+    @unittest.skipUnless(PDF_PATH.exists(), "需要校园地图资料")
+    def test_seed_entries_are_pending_and_cover_all_places(self):
+        layout = load_pdf_map()
+        state = initial_pdf_state(layout)
+        entries = [entry for place in state["entrances"].values() for entry in place]
+        self.assertEqual(set(state["entrances"]), set(state["places"]))
+        self.assertEqual(len(entries), 93)
+        self.assertEqual(sum(not entry["enabled"] for entry in entries), 4)
+        for entry in entries:
+            self.assertEqual(entry["source"], "map_inferred")
+            self.assertEqual(state["grid"][entry["point"][0]][entry["point"][1]], 0)
+        self.assertEqual(len(state["entrances"]["致远楼"]), 4)
+        self.assertEqual(len(state["entrances"]["体育馆（西）"]), 2)
+
+    def test_seed_merge_preserves_manual_entries_and_skips_blocked_cells(self):
+        layout = pdf_fixture()
+        state = initial_pdf_state(layout)
+        state["places"] = {"已有地点": [5, 5], "新增地点": [5, 5], "封路地点": [5, 5]}
+        manual = {"name": "手工入口", "point": [2, 2], "enabled": True}
+        state["entrances"]["已有地点"] = [manual]
+        state["classes"][2][5], state["grid"][2][5] = 3, 1
+        layout["entrance_markers_version"] = "test-entries-v1"
+        layout["place_entrances"] = [
+            {"place": name, "name": "候选入口", "point": point,
+             "source": "map_inferred", "enabled": True}
+            for name, point in (("已有地点", [2, 3]), ("新增地点", [2, 4]), ("封路地点", [2, 5]))
+        ]
+        original_grid = [row[:] for row in state["grid"]]
+        self.assertTrue(merge_place_entrances(state, layout))
+        self.assertEqual(state["entrances"]["已有地点"], [manual])
+        self.assertEqual(state["entrances"]["新增地点"][0]["source"], "map_inferred")
+        self.assertNotIn("封路地点", state["entrances"])
+        self.assertEqual(state["grid"], original_grid)
+        self.assertFalse(merge_place_entrances(state, layout))
+
+    def test_import_and_manual_edit_keep_entrance_sources_explicit(self):
+        layout = pdf_fixture()
+        state = initial_pdf_state(layout)
+        state["places"] = {"图书馆": [5, 5]}
+        set_place_entrance(state, "图书馆", "候选门", 2, 2, source="map_inferred")
+        imported = import_map_json(json.dumps({"format": MAP_JSON_FORMAT, "state": state}), layout)
+        self.assertEqual(imported["entrances"], state["entrances"])
+        set_place_entrance(state, "图书馆", "手工门", 2, 3)
+        self.assertNotIn("source", state["entrances"]["图书馆"][1])
+        state["entrances"]["图书馆"][0]["source"] = "unknown"
+        with self.assertRaisesRegex(ValueError, "入口"):
+            import_map_json(json.dumps({"format": MAP_JSON_FORMAT, "state": state}), layout)
 
     def test_save_route_snapshot_and_source_mismatch(self):
         layout = pdf_fixture()

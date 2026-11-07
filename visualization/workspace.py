@@ -126,9 +126,10 @@ def _draft_controls(saved, service):
                            width="stretch")
     st.caption("Ctrl+Z 后退 · Ctrl+Y 前进")
     st.html("""<script>
-        if (!window.campusPathDraftShortcuts) {
-            window.campusPathDraftShortcuts = true;
-            document.addEventListener("keydown", (event) => {
+        if (typeof window.campusPathDraftShortcuts === "function") {
+            document.removeEventListener("keydown", window.campusPathDraftShortcuts);
+        }
+        window.campusPathDraftShortcuts = (event) => {
                 if (!event.ctrlKey || event.shiftKey || event.altKey || event.metaKey ||
                     event.repeat || event.defaultPrevented ||
                     document.querySelector('[role="dialog"]') ||
@@ -141,8 +142,8 @@ def _draft_controls(saved, service):
                 if (!button || button.disabled) return;
                 event.preventDefault();
                 button.click();
-            });
-        }
+        };
+        document.addEventListener("keydown", window.campusPathDraftShortcuts);
         </script>""", unsafe_allow_javascript=True)
 
     if back or forward:
@@ -173,15 +174,16 @@ def _draft_controls(saved, service):
     st.rerun()
 
 
-def _header(state, revision):
+def _header(state, revision, pending=False):
     roads = sum(v == 0 for line in state["grid"] for v in line)
+    status = "有未保存修改" if pending else "已加载"
     st.html(Path(__file__).with_name("workspace.css").read_text(encoding="utf-8"))
     st.html(f'''<header class="campus-header">
       <div class="campus-brand"><span class="campus-logo">CP</span>
         <div><h1>校园地图</h1><p>CampusPath · 应急管理大学</p></div></div>
       <div class="campus-stats"><span><b>{ROWS} × {COLS}</b> 网格</span>
         <span><b>{len(state['places'])}</b> 地点</span><span><b>{roads:,}</b> 道路格</span></div>
-      <div class="campus-status"><i></i> 已加载 · 版本 {revision}<small>图面数据 · 入口待核实</small></div>
+      <div class="campus-status"><i></i> {status} · 版本 {revision}<small>图面数据 · 入口待核实</small></div>
     </header>''')
 
 
@@ -221,8 +223,8 @@ def _navigation(state, service, revision):
                     st.selectbox(label+"入口", options, key="_"+gate_key,
                                  on_change=_remember,args=("_"+gate_key,gate_key))
                 chosen[side] = None if ss[gate_key]=="自动选择最短入口" else ss[gate_key]
-            if any(items[0]["temporary"] for items in entries.values()):
-                st.warning("部分地点尚未录入入口，暂用附近道路格接入；这些点不是已核实的实际门。")
+            if any(entry["temporary"] for items in entries.values() for entry in items):
+                st.warning("本次导航包含图面推定或临时接入点，入口位置与实际通行情况待核实。")
         except ValueError as error:
             st.error(str(error))
             ready = False
@@ -322,6 +324,8 @@ def _places(state):
                 st.caption("该地点尚未录入入口。应用入口后，地图预览会显示方形图标。")
             entry_choice = st.selectbox("选择入口",["新增入口",*[e["name"] for e in entries]])
             entry = next((e for e in entries if e["name"]==entry_choice),None)
+            if entry and entry.get("source") == "map_inferred":
+                st.caption("该入口由图面推定，位置和连接通道待核实。")
             identity = (old_name,entry_choice)
             if ss.get("entry_for") != identity or "_entry_name" not in ss:
                 ss.entry_for = identity
@@ -338,7 +342,8 @@ def _places(state):
                     edited = deepcopy(state)
                     try:
                         set_place_entrance(edited,old_name,ss._entry_name,ss._entry_row,ss._entry_col,
-                                          enabled=ss._entry_enabled,old_name=entry["name"] if entry else None)
+                                          enabled=ss._entry_enabled,old_name=entry["name"] if entry else None,
+                                          source=entry.get("source","manual") if entry else "manual")
                     except ValueError as error:
                         st.error(str(error))
                     else:
@@ -445,11 +450,15 @@ def _maintenance(layout, state):
         components = road_components(state["grid"])
         st.write("四方向道路连通区域：",len(components))
         st.dataframe([{"区域":i+1,"道路格数":len(c)} for i,c in enumerate(components)],hide_index=True,width="stretch")
+        region = st.selectbox("在地图上查看道路区域", [None, *range(len(components))],
+                              format_func=lambda i: "不高亮" if i is None else f"区域 {i+1} · {len(components[i])} 格")
+        st.caption("选择区域后地图会高亮并定位，用于检查道路是否断开。")
     with st.expander("地图来源与使用范围"):
-        st.write("来源：reference/campus-map-integrated.pdf")
-        st.write("第 2 页分类与第 3 页道路网格逐格核对。")
+        st.write("底图：reference/campus-map-basemap.pdf")
+        st.write("初始分类：reference/initial-grid.json。颜色和通行状态由网格数据决定。")
         st.warning("当前为平面网格，不含已核实的天桥跨层关系。路线用于课程与图面校对，不能作为实地导航依据。")
-    return {"selected":[row,col],"selection_bounds":bounds}
+    return {"selected":[row,col],"selection_bounds":bounds,
+            "review_cells":components[region] if region is not None else None}
 
 
 def render_workspace(default_mode="导航"):
@@ -486,9 +495,17 @@ def render_workspace(default_mode="导航"):
     if ss.map_tool not in tools:
         ss.map_tool = "查看"
     editing = mode in ("地点", "维护")
-    draft = ss.get("map_draft") if editing else None
-    display_state = draft["state"] if draft else state
-    _header(display_state,revision)
+    draft = ss.get("map_draft")
+    pending = draft is not None and draft["state"] != state
+    display_state = draft["state"] if editing and draft else state
+    _header(display_state,revision,pending)
+    if pending:
+        if mode == "导航":
+            st.warning("有未保存修改，当前导航使用已保存地图。返回维护可继续编辑草稿。")
+        elif mode == "历史":
+            st.info("有未保存修改，当前显示查询时的地图快照。")
+        else:
+            st.info("有未保存修改，当前地图显示草稿。")
     controls,map_panel = st.container(key="workspace_layout").columns(
         [ss.control_width,100-ss.control_width],gap="medium")
     view = {}
@@ -575,4 +592,4 @@ def render_workspace(default_mode="导航"):
                             "modeBarButtonsToRemove":["select2d","lasso2d"]})
             with st.container(height=620,border=False,key="map_canvas_scroll"):
                 map_canvas()
-            st.html('<div class="campus-legend"><span><i class="legend-building"></i>建筑</span><span><i class="legend-road"></i>道路</span><span><i class="legend-boundary"></i>边界</span><span><i class="legend-route"></i>A* 路线</span><span><i class="legend-entrance"></i>入口启用</span><span><i class="legend-entrance-blocked"></i>入口受阻</span><span><i class="legend-entrance-disabled"></i>入口停用</span></div>')
+            st.html('<div class="campus-legend"><span><i class="legend-building"></i>建筑</span><span><i class="legend-road"></i>道路</span><span><i class="legend-boundary"></i>边界</span><span><i class="legend-route"></i>A* 路线</span><span><i class="legend-entrance"></i>手工入口</span><span><i class="legend-entrance-inferred"></i>候选入口</span><span><i class="legend-entrance-blocked"></i>入口受阻</span><span><i class="legend-entrance-disabled"></i>入口停用</span></div>')

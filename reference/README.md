@@ -1,9 +1,11 @@
 # 新地图参考资料
 
-当前使用用户提供的 `reference/campus-map-integrated.pdf`。三页依次为原图叠加、四分类及 A* 输入网格。程序读取原 PDF，不再生成或使用旧布局文件。
+当前底图使用用户提供的单页 `reference/campus-map-basemap.pdf`，其原文件名为“campus-map的副本 1.pdf”。底图显示建筑轮廓和文字，分类颜色来自 JSON 数据。
 
-`database/pdf_map.py` 的图面位置校准针对这一份 PDF。提取要求分类数量符合图例，并逐格核对第 2、3 页的道路；资料结构、尺寸或分类变化时应停止并重新校准。
+`reference/initial-grid.json` 保存 180×90 初始分类，以及底图指纹和裁切边界。分类提取自 `reference/campus-map-integrated.pdf` 的第 2 页，曾逐格核对第 3 页的道路。原三页 PDF 留作数据来源记录，程序运行时读取独立的初始 JSON。
 
 原图名来自 PDF 图面，建筑位置不会自动转为导航点。PDF 不包含天桥三层结构，当前仅按平面地图计算。
 
-此前的 `reference/campus-map.pdf`、`reference/campus-map.webp` 和 `reference/campus-layout.json` 可能留作本机历史资料；对应旧图实现可在提交 `327c7b1` 中查看。这些文件不参与当前版本运行。资料公开分发权限需单独核实。
+网格的来源标识沿用原版本，已有数据库和地图导出 JSON 可以继续使用。底图的文件指纹独立校验，更换文件后需要重新核对行列边界。资料公开分发权限需单独核实。
+
+`place-entrances.json` 保存 89 个地点的 93 个图面候选接入点及逐点说明。建筑优先取相邻主要道路，没有相邻道路的地点使用附近主路参考格。结合此前标记补入的方向候选中，4 个缺少直接连接道路，默认停用。所有候选都属于图面推定资料。

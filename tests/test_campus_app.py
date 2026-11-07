@@ -8,6 +8,7 @@ from streamlit.testing.v1 import AppTest
 from database.campus_project import CampusMapService
 from database.pdf_map import MAP_JSON_FORMAT, initial_pdf_state
 from tests.test_pdf_map import pdf_fixture
+from visualization.pdf_map import pdf_map_figure
 
 
 class CampusAppTests(unittest.TestCase):
@@ -26,6 +27,36 @@ class CampusAppTests(unittest.TestCase):
     def page(self, filename):
         root = Path(__file__).resolve().parents[1]
         return AppTest.from_file(str(root / "pages" / filename), default_timeout=40).run()
+
+    def test_unsaved_draft_is_marked_and_navigation_uses_saved_map(self):
+        before = self.service.load()
+        with patch("visualization.workspace.pdf_map_figure", wraps=pdf_map_figure) as render:
+            edit = self.page("road_review.py")
+            next(b for b in edit.button if b.label == "设为边界").click().run()
+            self.assertTrue(any("有未保存修改" in item.value for item in edit.info))
+            next(g for g in edit.get("button_group") if g.label == "操作台").set_value("导航").run()
+            self.assertTrue(any("导航使用已保存地图" in item.value for item in edit.warning))
+            self.assertEqual(render.call_args.args[1]["classes"][0][0], 0)
+            next(g for g in edit.get("button_group") if g.label == "操作台").set_value("维护").run()
+            self.assertEqual(render.call_args.args[1]["classes"][0][0], 3)
+            self.assertEqual(edit.session_state["map_draft"]["state"]["classes"][0][0], 3)
+        self.assertFalse(edit.exception)
+        self.assertEqual(self.service.load(), before)
+
+    def test_review_region_highlights_without_saving(self):
+        _, state = self.service.load()
+        state["classes"][10][10], state["grid"][10][10] = 2, 0
+        self.service.save(state)
+        before = self.service.load()
+        with patch("visualization.workspace.pdf_map_figure", wraps=pdf_map_figure) as render:
+            edit = self.page("road_review.py")
+            self.assertIsNone(render.call_args.kwargs["review_cells"])
+            region = next(s for s in edit.selectbox if s.label == "在地图上查看道路区域")
+            region.select(1).run()
+            self.assertEqual(render.call_args.kwargs["review_cells"], [(10, 10)])
+        self.assertFalse(edit.exception)
+        self.assertEqual(self.service.load(), before)
+        self.assertNotIn("map_draft", edit.session_state)
 
     def test_name_navigation_edit_and_history(self):
         nav = self.page("navigation.py")
@@ -82,6 +113,19 @@ class CampusAppTests(unittest.TestCase):
         self.assertTrue(any("没有当前可用的已指定入口" in e.value for e in nav.error))
         self.assertTrue(next(b for b in nav.button if b.label == "开始 A* 搜索").disabled)
         self.assertEqual(self.service.history(), [])
+
+    def test_inferred_entrance_keeps_pending_status_in_route_history(self):
+        _, state = self.service.load()
+        state["entrances"]["示例起点"][0]["source"] = "map_inferred"
+        self.service.save(state)
+        nav = self.page("navigation.py")
+        self.assertTrue(any("图面推定" in warning.value for warning in nav.warning))
+        next(b for b in nav.button if b.label == "开始 A* 搜索").click().run()
+        self.assertFalse(nav.exception)
+        query = self.service.history()[0]["snapshot"]["route_query"]
+        self.assertTrue(query["start_access"]["temporary"])
+        self.assertEqual(query["start_access"]["source"], "map_inferred")
+        self.assertFalse(query["goal_access"]["temporary"])
 
     def test_manual_building_marker_can_be_inside_building(self):
         edit = self.page("map_management.py")

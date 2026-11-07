@@ -59,33 +59,30 @@ def pdf_map_figure(layout, state, start=None, goal=None, result=None, step=None,
                    show_background=False, selected=None, show_building_labels=False,
                    access_start=None, access_goal=None, show_grid=False,
                    show_visited=False, focus=False, selectable_cells=False,
-                   selection_bounds=None, view_revision=0, label_cell_pixels=9.5):
+                   selection_bounds=None, view_revision=0, label_cell_pixels=9.5,
+                   review_cells=None):
     fig = go.Figure()
     if show_background:
         fig.add_layout_image(source="data:image/png;base64," + b64encode(layout["background"]).decode(),
                              xref="x", yref="y", x=0, y=0, sizex=COLS, sizey=ROWS,
                              sizing="stretch", xanchor="left", yanchor="top", layer="below")
-    scale = []
+    display_scale = []
     for i, color in enumerate(COLORS):
-        scale.extend([[i/4, color], [(i+1)/4, color]])
+        display_color = "rgba(0,0,0,0)" if show_background and i == 0 else color
+        display_scale.extend([[i/4, display_color], [(i+1)/4, display_color]])
     x, y = [c+.5 for c in range(COLS)], [r+.5 for r in range(ROWS)]
     gap = 1 if show_grid else 0
     fig.add_trace(go.Heatmap(
         x=x, y=y,
-        z=state["classes"], zmin=-.5, zmax=3.5, colorscale=scale,
+        z=state["classes"], zmin=-.5, zmax=3.5, colorscale=display_scale,
         text=[[CLASS_NAMES[v] for v in row] for row in state["classes"]],
         customdata=[[[r, c] for c in range(COLS)] for r in range(ROWS)],
         hovertemplate="%{text} · 行 %{customdata[0]}，列 %{customdata[1]}<extra></extra>",
         xgap=gap, ygap=gap,
-        opacity=.25 if show_background else 1,
-        showscale=False, name="PDF 分类"))
-    if show_background and state["classes"] != layout["classes"]:
-        changed = [[cell if cell != original else None for cell, original in zip(row, source_row)]
-                   for row, source_row in zip(state["classes"], layout["classes"])]
-        fig.add_trace(go.Heatmap(
-            x=x, y=y, z=changed, zmin=-.5, zmax=3.5, colorscale=scale,
-            xgap=gap, ygap=gap, opacity=1, hoverinfo="skip", hoverongaps=False,
-            showscale=False, name="已修改格子"))
+        opacity=.55 if show_background else 1,
+        showscale=False, name="地图分类"))
+    if review_cells:
+        _overlay(fig, review_cells, "核查道路区域", "rgba(124,58,237,.55)", show_grid)
     if result:
         count = result.expanded_count if step is None else step
         if show_visited:
@@ -153,30 +150,34 @@ def pdf_map_figure(layout, state, start=None, goal=None, result=None, step=None,
             row, col = entry["point"]
             if not (0 <= row < ROWS and 0 <= col < COLS):
                 continue
+            inferred = entry.get("source") == "map_inferred"
+            provenance = "图面推定，待核实" if inferred else "手动录入，实际情况待核实"
             if not entry.get("enabled", True):
                 status, color, symbol = "已停用", "#64748b", "square-open"
             elif state["grid"][row][col] != 0:
                 status, color, symbol = "道路不可通行", "#b45309", "square"
             else:
-                status, color, symbol = "已启用", "#0f766e", "square"
-            entrances.append((place, entry["name"], row, col, status, color, symbol))
+                status, color = "已启用", "#0f766e"
+                symbol = "square-open" if inferred else "square"
+            entrances.append((place, entry["name"], row, col, status, color, symbol, provenance))
     if entrances:
         fig.add_trace(go.Scatter(
-            x=[col+.5 for _, _, _, col, _, _, _ in entrances],
-            y=[row+.5 for _, _, row, _, _, _, _ in entrances],
+            x=[col+.5 for _, _, _, col, _, _, _, _ in entrances],
+            y=[row+.5 for _, _, row, _, _, _, _, _ in entrances],
             mode="markers", name="已录入入口",
             marker=dict(size=12, color=[item[5] for item in entrances],
                         symbol=[item[6] for item in entrances],
                         line=dict(color=[item[5] for item in entrances], width=2)),
-            customdata=[[row, col, "入口", place, entry_name, status]
-                        for place, entry_name, row, col, status, _, _ in entrances],
+            customdata=[[row, col, "入口", place, entry_name, status, provenance]
+                        for place, entry_name, row, col, status, _, _, provenance in entrances],
             hovertemplate=("%{customdata[3]} · %{customdata[4]}<br>"
                            "%{customdata[5]} · 行 %{customdata[0]}，列 %{customdata[1]}"
-                           "<br>手动录入，实际情况仍需核实<extra></extra>")))
+                           "<br>%{customdata[6]}<extra></extra>")))
     x_range,y_range = [0,COLS],[ROWS,0]
-    if focus:
-        points = [p for p in (start,goal,selected,access_start,access_goal) if p is not None]
-        if result and result.found:
+    if focus or review_cells:
+        points = list(review_cells) if review_cells else [
+            p for p in (start,goal,selected,access_start,access_goal) if p is not None]
+        if not review_cells and result and result.found:
             points += result.path
         if points:
             cols,rows = [p[-1] for p in points],[p[-2] for p in points]
@@ -192,5 +193,5 @@ def pdf_map_figure(layout, state, start=None, goal=None, result=None, step=None,
                       plot_bgcolor="#fffdf7", paper_bgcolor="#fffdf7", dragmode="pan",
                       clickmode="event+select",
                       hoverlabel=dict(bgcolor="white",font=dict(size=12,color="#334155")),
-                      uirevision="pdf-"+layout["source_hash"]+str((x_range,y_range,focus,view_revision)))
+                      uirevision="pdf-"+layout.get("background_hash", layout["source_hash"])+str((x_range,y_range,focus,view_revision)))
     return fig

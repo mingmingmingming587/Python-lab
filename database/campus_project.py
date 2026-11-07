@@ -44,6 +44,7 @@ SCHEMA = (
         row INTEGER NOT NULL CHECK (row >= 0),
         col INTEGER NOT NULL CHECK (col >= 0),
         enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+        source TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'map_inferred')),
         UNIQUE (place_id, name)
     )""",
     """CREATE TABLE campus_route_history (
@@ -105,17 +106,24 @@ class CampusMapService:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with closing(self._connect()) as conn, conn:
-            if conn.execute("PRAGMA user_version").fetchone()[0] == 1:
+            if conn.execute("PRAGMA user_version").fetchone()[0] == 2:
                 return
             # 建表、复制历史和移除旧表在同一个事务中完成。
             conn.execute("BEGIN IMMEDIATE")
             version = conn.execute("PRAGMA user_version").fetchone()[0]
-            if version == 1:
+            if version == 2:
                 return
-            if version != 0:
+            if version not in (0, 1):
                 raise ValueError("数据库结构版本不受支持")
-            self._initialize(conn, initial_state)
-            conn.execute("PRAGMA user_version = 1")
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            if "maps" not in tables:
+                self._initialize(conn, initial_state)
+            else:
+                columns = {row["name"] for row in conn.execute("PRAGMA table_info(place_entrances)")}
+                if "source" not in columns:
+                    conn.execute("""ALTER TABLE place_entrances ADD COLUMN source TEXT NOT NULL
+                                    DEFAULT 'manual' CHECK (source IN ('manual', 'map_inferred'))""")
+            conn.execute("PRAGMA user_version = 2")
 
     def _connect(self):
         conn = sqlite3.connect(self.db_path)
@@ -182,8 +190,10 @@ class CampusMapService:
                 row, col = entry["point"]
                 if not (0 <= row < rows and 0 <= col < cols):
                     raise ValueError(f"入口坐标超出地图：{name} / {entry['name']}")
-                conn.execute("INSERT INTO place_entrances (place_id, name, row, col, enabled) VALUES (?, ?, ?, ?, ?)",
-                             (cursor.lastrowid, entry["name"], row, col, int(entry.get("enabled", True))))
+                conn.execute("""INSERT INTO place_entrances (place_id, name, row, col, enabled, source)
+                                VALUES (?, ?, ?, ?, ?, ?)""",
+                             (cursor.lastrowid, entry["name"], row, col, int(entry.get("enabled", True)),
+                              entry.get("source", "manual")))
 
     def load(self):
         with closing(self._connect()) as conn, conn:
@@ -211,12 +221,15 @@ class CampusMapService:
                     state["place_kinds"][name] = place["kind"]
                 if place["status"] is not None:
                     state["place_status"][name] = place["status"]
-            for entry in conn.execute("""SELECT p.name AS place_name, e.name, e.row, e.col, e.enabled
+            for entry in conn.execute("""SELECT p.name AS place_name, e.name, e.row, e.col, e.enabled, e.source
                 FROM place_entrances AS e JOIN places AS p ON e.place_id=p.id
                 WHERE p.map_id=1 ORDER BY e.id"""):
-                state["entrances"].setdefault(entry["place_name"], []).append({
+                entrance = {
                     "name": entry["name"], "point": [entry["row"], entry["col"]], "enabled": bool(entry["enabled"]),
-                })
+                }
+                if entry["source"] == "map_inferred":
+                    entrance["source"] = entry["source"]
+                state["entrances"].setdefault(entry["place_name"], []).append(entrance)
             return map_row["revision"], state
 
     def save(self, state):

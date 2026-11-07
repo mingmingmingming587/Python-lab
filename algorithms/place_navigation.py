@@ -13,7 +13,7 @@ def access_points(state, name):
                      grid[e["point"][0]][e["point"][1]] == 0]
         if not available:
             raise ValueError(f"{name} 没有当前可用的已指定入口")
-        return [{**e, "temporary": False} for e in available]
+        return [{**e, "temporary": e.get("source") == "map_inferred"} for e in available]
     row, col = state["places"][name]
     roads = [(abs(r-row)+abs(c-col), r, c) for r, line in enumerate(grid)
              for c, value in enumerate(line) if value == 0]
