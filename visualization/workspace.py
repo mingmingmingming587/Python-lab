@@ -24,7 +24,6 @@ EDIT_HISTORY_LIMIT = 20
 def _swap_endpoints():
     ss = st.session_state
     ss.nav_start, ss.nav_goal = ss.nav_goal, ss.nav_start
-    ss.nav_gate_start, ss.nav_gate_goal = ss.nav_gate_goal, ss.nav_gate_start
     ss.pop("nav_route", None)
     ss.playing = False
 
@@ -36,7 +35,6 @@ def _remember(widget, domain):
 def _use_map_place(side):
     ss = st.session_state
     ss["nav_"+side] = ss.map_place
-    ss["nav_gate_"+side] = None
     ss.pop("nav_route",None)
     ss.playing = False
 
@@ -74,9 +72,9 @@ def _map_selected():
         name = data[3] if len(data) > 3 else ""
         if ss.workspace_mode == "导航" and name:
             if ss.map_tool == "设起点":
-                ss.nav_start, ss.nav_gate_start = name, None
+                ss.nav_start = name
             elif ss.map_tool == "设终点":
-                ss.nav_goal, ss.nav_gate_goal = name, None
+                ss.nav_goal = name
             ss.map_place = name
             if ss.map_tool in ("设起点", "设终点"):
                 ss.pop("nav_route", None)
@@ -208,27 +206,16 @@ def _navigation(state, service, revision):
     st.button("交换起点与终点", on_click=_swap_endpoints, width="stretch")
     start, goal = (ss.nav_start if names else None), (ss.nav_goal if names else None)
     ready = bool(start and goal)
-    chosen, entries = {}, {}
+    entries = {}
     if ready:
         try:
-            for side, label, name in (("start","起点",start),("goal","终点",goal)):
-                available = access_points(state,name)
-                entries[side] = available
-                options = ["自动选择最短入口"]+[e["name"] for e in available]
-                gate_key = "nav_gate_"+side
-                if ss.get(gate_key) not in options:
-                    ss[gate_key] = "自动选择最短入口"
-                if len(available)>1:
-                    ss["_"+gate_key] = ss[gate_key]
-                    st.selectbox(label+"入口", options, key="_"+gate_key,
-                                 on_change=_remember,args=("_"+gate_key,gate_key))
-                chosen[side] = None if ss[gate_key]=="自动选择最短入口" else ss[gate_key]
+            entries = {"start": access_points(state,start), "goal": access_points(state,goal)}
             if any(entry["temporary"] for items in entries.values() for entry in items):
                 st.warning("本次导航包含图面推定或临时接入点，入口位置与实际通行情况待核实。")
         except ValueError as error:
             st.error(str(error))
             ready = False
-    signature = (revision,start,goal,chosen.get("start"),chosen.get("goal"))
+    signature = (revision,start,goal)
     route = ss.get("nav_route")
     if route and route["signature"] != signature:
         ss.pop("nav_route",None)
@@ -236,7 +223,7 @@ def _navigation(state, service, revision):
         route = None
     if st.button("开始 A* 搜索",type="primary",disabled=not ready,width="stretch"):
         try:
-            result, a, b = plan_named_route(state,start,goal,chosen["start"],chosen["goal"])
+            result, a, b = plan_named_route(state,start,goal)
             service.save_route(start,goal,{**state,"route_query":{"start_access":a,"goal_access":b}},result)
             route = {"signature":signature,"result":result,"start_access":a,"goal_access":b}
             ss.nav_route = route
@@ -318,18 +305,17 @@ def _places(state):
                 _stage_edit(state,edited)
     selected_point = [ss._marker_row,ss._marker_col]
     if old_name:
-        with st.expander("导航入口：新增或修改",expanded=True):
+        with st.expander("导航入口：设置或修改",expanded=True):
             entries = state.get("entrances",{}).get(old_name,[])
             if not entries:
                 st.caption("该地点尚未录入入口。应用入口后，地图预览会显示方形图标。")
-            entry_choice = st.selectbox("选择入口",["新增入口",*[e["name"] for e in entries]])
-            entry = next((e for e in entries if e["name"]==entry_choice),None)
+            entry = entries[0] if entries else None
             if entry and entry.get("source") == "map_inferred":
                 st.caption("该入口由图面推定，位置和连接通道待核实。")
-            identity = (old_name,entry_choice)
+            identity = (old_name,entry["name"] if entry else None)
             if ss.get("entry_for") != identity or "_entry_name" not in ss:
                 ss.entry_for = identity
-                ss._entry_name = entry["name"] if entry else ""
+                ss._entry_name = entry["name"] if entry else "入口"
                 ss._entry_row,ss._entry_col = entry["point"] if entry else point
                 ss._entry_enabled = entry.get("enabled",True) if entry else True
             with st.form("place_entry"):
@@ -342,13 +328,13 @@ def _places(state):
                     edited = deepcopy(state)
                     try:
                         set_place_entrance(edited,old_name,ss._entry_name,ss._entry_row,ss._entry_col,
-                                          enabled=ss._entry_enabled,old_name=entry["name"] if entry else None,
+                                          enabled=ss._entry_enabled,
                                           source=entry.get("source","manual") if entry else "manual")
                     except ValueError as error:
                         st.error(str(error))
                     else:
                         _stage_edit(state,edited)
-            st.caption("入口必须位于道路格。可维护多个入口，停用后不参与导航。")
+            st.caption("每个地点设置一个道路入口，停用后暂停该地点的导航。")
             if ss.map_tool == "入口位置":
                 selected_point = [ss._entry_row,ss._entry_col]
     return {"selected":selected_point}
@@ -471,7 +457,7 @@ def render_workspace(default_mode="导航"):
     defaults = {"control_width":25,"playing":False,"show_visited":False,
                 "show_background":True,"show_grid":False,"show_labels":True,
                 "focus_map":False,"view_revision":0,"map_tool":"查看",
-                "nav_gate_start":None,"nav_gate_goal":None,"map_scale":"清晰浏览"}
+                "map_scale":"清晰浏览"}
     for key,value in defaults.items():
         ss.setdefault(key,value)
     if not ss.get("coordinates_2d_applied"):
@@ -592,4 +578,4 @@ def render_workspace(default_mode="导航"):
                             "modeBarButtonsToRemove":["select2d","lasso2d"]})
             with st.container(height=620,border=False,key="map_canvas_scroll"):
                 map_canvas()
-            st.html('<div class="campus-legend"><span><i class="legend-building"></i>建筑</span><span><i class="legend-road"></i>道路</span><span><i class="legend-boundary"></i>边界</span><span><i class="legend-route"></i>A* 路线</span><span><i class="legend-entrance"></i>手工入口</span><span><i class="legend-entrance-inferred"></i>候选入口</span><span><i class="legend-entrance-blocked"></i>入口受阻</span><span><i class="legend-entrance-disabled"></i>入口停用</span></div>')
+            st.html('<div class="campus-legend"><span><i class="legend-building"></i>建筑</span><span><i class="legend-road"></i>道路</span><span><i class="legend-boundary"></i>边界</span><span><i class="legend-route"></i>A* 路线</span><span><i class="legend-start"></i>起点</span><span><i class="legend-goal"></i>终点</span><span><i class="legend-entrance"></i>手工入口</span><span><i class="legend-entrance-inferred"></i>候选入口</span><span><i class="legend-entrance-blocked"></i>入口受阻</span><span><i class="legend-entrance-disabled"></i>入口停用</span></div>')

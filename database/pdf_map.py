@@ -11,7 +11,7 @@ from pathlib import Path
 import pymupdf
 from PIL import Image
 
-from database.campus_project import CampusMapService
+from database.campus_project import CampusMapService, single_entrances
 
 ROOT = Path(__file__).resolve().parents[1]
 PDF_PATH = ROOT / "reference" / "campus-map-basemap.pdf"
@@ -177,6 +177,7 @@ def import_map_json(data, layout):
         raise ValueError("地图名称无效。")
     result.update(name=name, classes=classes, grid=[[0 if cell == 2 else 1 for cell in row] for row in classes],
                   places=places, place_kinds=kinds, place_status=statuses, entrances=entrances)
+    result["entrances"] = single_entrances(entrances, result["grid"])
     return result
 
 
@@ -214,6 +215,7 @@ def merge_place_entrances(state, layout):
                 "enabled": marker["enabled"], "source": "map_inferred",
             })
             added.add(marker["place"])
+            missing.remove(marker["place"])
     for name in added:
         status = state.get("place_status", {}).get(name, "")
         if status.startswith("PDF 图面定位；"):
@@ -247,7 +249,7 @@ def set_building_marker(state, name, row, col, *, old_name=None, kind="建筑"):
     state["place_status"][name] = "手动地点标记"
 
 
-def set_place_entrance(state, place, name, row, col, *, enabled=True, old_name=None, source="manual"):
+def set_place_entrance(state, place, name, row, col, *, enabled=True, source="manual"):
     """保存明确指定的路网入口；不修改建筑标记或通行格。"""
     name = name.strip()
     if place not in state["places"] or not name:
@@ -256,15 +258,10 @@ def set_place_entrance(state, place, name, row, col, *, enabled=True, old_name=N
         raise ValueError("入口必须位于可通行道路格")
     if source not in ("manual", "map_inferred"):
         raise ValueError("入口来源无效")
-    entries = state.setdefault("entrances", {}).setdefault(place, [])
-    if any(e["name"] == name and e["name"] != old_name for e in entries):
-        raise ValueError("入口名称已存在，请选择已有入口修改")
-    if old_name:
-        entries[:] = [e for e in entries if e["name"] != old_name]
     entry = {"name": name, "point": [row, col], "enabled": bool(enabled)}
     if source == "map_inferred":
         entry["source"] = source
-    entries.append(entry)
+    state.setdefault("entrances", {})[place] = [entry]
 
 
 def set_grid_region(state, bounds, classification):

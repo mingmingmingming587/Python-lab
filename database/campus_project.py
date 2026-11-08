@@ -101,19 +101,32 @@ def _walkability(classes):
     return [[int(cell_type != 2) for cell_type in row] for row in classes]
 
 
+def single_entrances(entrances, grid):
+    """兼容旧地图，优先保留已启用且道路可通行的入口。"""
+    def preference(entry):
+        row, col = entry["point"]
+        enabled = entry.get("enabled", True)
+        walkable = (0 <= row < len(grid) and 0 <= col < len(grid[row])
+                    and grid[row][col] == 0)
+        return (not (enabled and walkable), not enabled)
+
+    return {place: [min(entries, key=preference)]
+            for place, entries in entrances.items() if entries}
+
+
 class CampusMapService:
     def __init__(self, initial_state, db_path):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with closing(self._connect()) as conn, conn:
-            if conn.execute("PRAGMA user_version").fetchone()[0] == 2:
+            if conn.execute("PRAGMA user_version").fetchone()[0] == 3:
                 return
             # 建表、复制历史和移除旧表在同一个事务中完成。
             conn.execute("BEGIN IMMEDIATE")
             version = conn.execute("PRAGMA user_version").fetchone()[0]
-            if version == 2:
+            if version == 3:
                 return
-            if version not in (0, 1):
+            if version not in (0, 1, 2):
                 raise ValueError("数据库结构版本不受支持")
             tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             if "maps" not in tables:
@@ -123,7 +136,20 @@ class CampusMapService:
                 if "source" not in columns:
                     conn.execute("""ALTER TABLE place_entrances ADD COLUMN source TEXT NOT NULL
                                     DEFAULT 'manual' CHECK (source IN ('manual', 'map_inferred'))""")
-            conn.execute("PRAGMA user_version = 2")
+            duplicates = conn.execute("""SELECT p.id, p.map_id FROM places p
+                JOIN place_entrances e ON e.place_id=p.id
+                GROUP BY p.id HAVING count(*) > 1""").fetchall()
+            for place in duplicates:
+                kept = conn.execute("""SELECT e.id FROM place_entrances e
+                    LEFT JOIN map_cells c ON c.map_id=? AND c.row=e.row AND c.col=e.col
+                    WHERE e.place_id=?
+                    ORDER BY (e.enabled=1 AND c.cell_type=2) DESC, e.enabled DESC, e.id
+                    LIMIT 1""", (place["map_id"], place["id"])).fetchone()[0]
+                conn.execute("DELETE FROM place_entrances WHERE place_id=? AND id<>?", (place["id"], kept))
+            for map_id in {place["map_id"] for place in duplicates}:
+                conn.execute("UPDATE maps SET revision=revision+1 WHERE id=?", (map_id,))
+            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS one_entrance_per_place ON place_entrances(place_id)")
+            conn.execute("PRAGMA user_version = 3")
 
     def _connect(self):
         conn = sqlite3.connect(self.db_path)
@@ -181,6 +207,7 @@ class CampusMapService:
         entrances = state.get("entrances", {})
         if entrances.keys() - state["places"].keys():
             raise ValueError("存在未关联地点的入口")
+        entrances = single_entrances(entrances, state["grid"])
         for name, (row, col) in state["places"].items():
             if not (0 <= row < rows and 0 <= col < cols):
                 raise ValueError(f"地点坐标超出地图：{name}")

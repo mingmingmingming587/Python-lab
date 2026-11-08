@@ -47,7 +47,7 @@ class LegacyDataTests(unittest.TestCase):
         self.assertEqual(state["place_status"]["图书馆"], "手动校对")
         self.assertEqual(state["building_markers_version"], "marks-v3")
         self.assertEqual(state["entrances"]["图书馆"][0]["point"], [0, 0])
-        self.assertFalse(state["entrances"]["图书馆"][1]["enabled"])
+        self.assertEqual(len(state["entrances"]["图书馆"]), 1)
         history = service.history()[0]
         self.assertEqual((history["id"], history["created_at"]), (7, "2026-11-06T12:00:00Z"))
         self.assertEqual(history["path"], [[0, 0], [0, 1]])
@@ -89,8 +89,29 @@ class LegacyDataTests(unittest.TestCase):
                 self.assertEqual(reopened.history(), history)
                 self.assertEqual(CampusMapService(self.initial, self.db).load(), before)
                 with closing(sqlite3.connect(self.db)) as conn:
-                    self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 2)
+                    self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 3)
                     self.assertEqual({row[0] for row in conn.execute("SELECT source FROM place_entrances")}, {"manual"})
+
+    def test_multiple_entry_migration_keeps_available_entry_and_history(self):
+        service = CampusMapService(self.initial, self.db)
+        revision, _ = service.load()
+        history = service.history()
+        with closing(sqlite3.connect(self.db)) as conn, conn:
+            conn.execute("DROP INDEX one_entrance_per_place")
+            conn.execute("UPDATE place_entrances SET enabled=0")
+            conn.execute("""INSERT INTO place_entrances (place_id,name,row,col,enabled)
+                SELECT id,'可用入口',0,1,1 FROM places WHERE name='图书馆'""")
+            conn.execute("PRAGMA user_version=2")
+        reopened = CampusMapService(self.initial, self.db)
+        updated_revision, state = reopened.load()
+        self.assertEqual(updated_revision, revision+1)
+        self.assertEqual([entry["name"] for entry in state["entrances"]["图书馆"]], ["可用入口"])
+        self.assertEqual(reopened.history(), history)
+        self.assertEqual(CampusMapService(self.initial, self.db).load(), (updated_revision, state))
+        with closing(sqlite3.connect(self.db)) as conn, conn:
+            with self.assertRaises(sqlite3.IntegrityError):
+                conn.execute("""INSERT INTO place_entrances (place_id,name,row,col,enabled)
+                    SELECT id,'重复入口',0,0,1 FROM places WHERE name='图书馆'""")
 
     def test_inferred_entry_source_survives_save_and_reopen(self):
         service = CampusMapService(self.initial, self.db)
@@ -99,10 +120,10 @@ class LegacyDataTests(unittest.TestCase):
         service.save(state)
         loaded = CampusMapService(self.initial, self.db).load()[1]
         self.assertEqual(loaded["entrances"], state["entrances"])
-        self.assertNotIn("source", loaded["entrances"]["图书馆"][1])
+        self.assertEqual(len(loaded["entrances"]["图书馆"]), 1)
 
     def test_migration_rolls_back_if_a_late_insert_fails(self):
-        self.legacy["entrances"]["图书馆"].append(self.legacy["entrances"]["图书馆"][0])
+        self.legacy["entrances"]["图书馆"][0]["source"] = "invalid-source"
         with closing(sqlite3.connect(self.db)) as conn, conn:
             conn.execute("UPDATE campus_project SET data=? WHERE id=1", (json.dumps(self.legacy),))
         with self.assertRaises(sqlite3.IntegrityError):

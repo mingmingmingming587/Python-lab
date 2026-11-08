@@ -13,7 +13,8 @@ def access_points(state, name):
                      grid[e["point"][0]][e["point"][1]] == 0]
         if not available:
             raise ValueError(f"{name} 没有当前可用的已指定入口")
-        return [{**e, "temporary": e.get("source") == "map_inferred"} for e in available]
+        entry = available[0]
+        return [{**entry, "temporary": entry.get("source") == "map_inferred"}]
     row, col = state["places"][name]
     roads = [(abs(r-row)+abs(c-col), r, c) for r, line in enumerate(grid)
              for c, value in enumerate(line) if value == 0]
@@ -24,19 +25,8 @@ def access_points(state, name):
              "temporary": True, "offset_steps": distance}]
 
 
-def plan_named_route(state, start_name, goal_name, start_gate=None, goal_gate=None):
-    starts, goals = access_points(state, start_name), access_points(state, goal_name)
-    if start_gate is not None:
-        starts = [e for e in starts if e["name"] == start_gate]
-    if goal_gate is not None:
-        goals = [e for e in goals if e["name"] == goal_gate]
-    if not starts or not goals:
-        raise ValueError("所选入口已不可用，请重新选择")
-    best = None
-    for start in starts:
-        for goal in goals:
-            result = astar(state["grid"], tuple(start["point"]), tuple(goal["point"]))
-            if best is None or (result.found and
-                    (not best[0].found or result.path_length < best[0].path_length)):
-                best = result, start, goal
-    return best
+def plan_named_route(state, start_name, goal_name):
+    start = access_points(state, start_name)[0]
+    goal = access_points(state, goal_name)[0]
+    result = astar(state["grid"], tuple(start["point"]), tuple(goal["point"]))
+    return result, start, goal

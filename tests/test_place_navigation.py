@@ -21,7 +21,7 @@ class PlaceNavigationTests(unittest.TestCase):
         self.assertNotIn((5, 5),result.path)
         self.assertEqual(self.state["grid"],original)
 
-    def test_multiple_entrances_choose_shortest_or_honor_selection(self):
+    def test_setting_an_entrance_replaces_the_previous_one(self):
         set_place_entrance(self.state,"起点建筑","西门",2,2)
         set_place_entrance(self.state,"起点建筑","东门",2,7)
         set_place_entrance(self.state,"终点建筑","入口",2,8)
@@ -29,9 +29,10 @@ class PlaceNavigationTests(unittest.TestCase):
         self.assertEqual(result.path_length,1)
         self.assertEqual(start["name"],"东门")
         self.assertFalse(start["temporary"])
-        self.assertEqual(plan_named_route(self.state,"起点建筑","终点建筑",start_gate="西门")[0].path_length,6)
-        set_place_entrance(self.state,"起点建筑","东门",2,7,old_name="东门",enabled=False)
-        self.assertEqual(plan_named_route(self.state,"起点建筑","终点建筑")[0].path_length,6)
+        self.assertEqual(len(self.state["entrances"]["起点建筑"]), 1)
+        set_place_entrance(self.state,"起点建筑","东门",2,7,enabled=False)
+        with self.assertRaises(ValueError):
+            plan_named_route(self.state,"起点建筑","终点建筑")
 
     def test_disabled_or_blocked_entries_do_not_silently_use_temporary_access(self):
         set_place_entrance(self.state,"起点建筑","门",2,2,enabled=False)

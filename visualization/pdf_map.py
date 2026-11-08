@@ -89,7 +89,7 @@ def pdf_map_figure(layout, state, start=None, goal=None, result=None, step=None,
             _overlay(fig, result.visited_order[:count], "已扩展节点", "#f5b44f", show_grid)
         if result.found and count == result.expanded_count:
             _overlay(fig, result.path, "A* 路径", "#2563eb", show_grid)
-    for point, name, color in ((start, "起点", "#087f23"), (goal, "终点", "#be123c"),
+    for point, name, color in ((start, "起点", "#087f23"), (goal, "终点", "#7c3aed"),
                                (selected if not selection_bounds else None, "所选格子", "#9333ea"),
                                (access_start, "起点道路接入", "#0d9488"),
                                (access_goal, "终点道路接入", "#db2777")):
@@ -155,7 +155,7 @@ def pdf_map_figure(layout, state, start=None, goal=None, result=None, step=None,
             if not entry.get("enabled", True):
                 status, color, symbol = "已停用", "#64748b", "square-open"
             elif state["grid"][row][col] != 0:
-                status, color, symbol = "道路不可通行", "#b45309", "square"
+                status, color, symbol = "道路不可通行", "#ea580c", "diamond"
             else:
                 status, color = "已启用", "#0f766e"
                 symbol = "square-open" if inferred else "square"

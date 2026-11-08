@@ -130,13 +130,12 @@ class PDFMapTests(unittest.TestCase):
         state = initial_pdf_state(layout)
         entries = [entry for place in state["entrances"].values() for entry in place]
         self.assertEqual(set(state["entrances"]), set(state["places"]))
-        self.assertEqual(len(entries), 93)
-        self.assertEqual(sum(not entry["enabled"] for entry in entries), 4)
+        self.assertEqual(len(entries), 89)
+        self.assertEqual(sum(not entry["enabled"] for entry in entries), 0)
         for entry in entries:
             self.assertEqual(entry["source"], "map_inferred")
             self.assertEqual(state["grid"][entry["point"][0]][entry["point"][1]], 0)
-        self.assertEqual(len(state["entrances"]["致远楼"]), 4)
-        self.assertEqual(len(state["entrances"]["体育馆（西）"]), 2)
+        self.assertTrue(all(len(entries) == 1 for entries in state["entrances"].values()))
 
     def test_seed_merge_preserves_manual_entries_and_skips_blocked_cells(self):
         layout = pdf_fixture()
@@ -167,10 +166,23 @@ class PDFMapTests(unittest.TestCase):
         imported = import_map_json(json.dumps({"format": MAP_JSON_FORMAT, "state": state}), layout)
         self.assertEqual(imported["entrances"], state["entrances"])
         set_place_entrance(state, "图书馆", "手工门", 2, 3)
-        self.assertNotIn("source", state["entrances"]["图书馆"][1])
+        self.assertEqual(len(state["entrances"]["图书馆"]), 1)
+        self.assertNotIn("source", state["entrances"]["图书馆"][0])
         state["entrances"]["图书馆"][0]["source"] = "unknown"
         with self.assertRaisesRegex(ValueError, "入口"):
             import_map_json(json.dumps({"format": MAP_JSON_FORMAT, "state": state}), layout)
+
+    def test_legacy_json_keeps_one_available_entrance(self):
+        layout = pdf_fixture()
+        state = initial_pdf_state(layout)
+        state["places"] = {"图书馆": [5, 5]}
+        state["entrances"] = {"图书馆": [
+            {"name": "停用", "point": [2, 2], "enabled": False},
+            {"name": "受阻", "point": [5, 5], "enabled": True},
+            {"name": "保留", "point": [2, 3], "enabled": True},
+        ]}
+        imported = import_map_json(json.dumps({"format": MAP_JSON_FORMAT, "state": state}), layout)
+        self.assertEqual([e["name"] for e in imported["entrances"]["图书馆"]], ["保留"])
 
     def test_save_route_snapshot_and_source_mismatch(self):
         layout = pdf_fixture()
@@ -245,7 +257,11 @@ class PDFMapTests(unittest.TestCase):
         trace = next(trace for trace in figure.data if trace.name == "已录入入口")
         self.assertEqual([item[4] for item in trace.customdata], ["东门", "西门", "北门"])
         self.assertEqual([item[5] for item in trace.customdata], ["已启用", "已停用", "道路不可通行"])
-        self.assertEqual(list(trace.marker.symbol), ["square", "square-open", "square"])
+        self.assertEqual(list(trace.marker.symbol), ["square", "square-open", "diamond"])
+        goal = pdf_map_figure(layout, state, goal=[2, 3])
+        goal_trace = next(t for t in goal.data if t.name == "终点")
+        self.assertEqual(goal_trace.colorscale[0][1], "#7c3aed")
+        self.assertEqual(trace.marker.color[2], "#ea580c")
         self.assertEqual(state["grid"], before)
         del state["entrances"]
         self.assertNotIn("已录入入口", [trace.name for trace in pdf_map_figure(layout, state).data])

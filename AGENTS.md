@@ -27,6 +27,7 @@
 - 当前底图为 `reference/campus-map-basemap.pdf`，180×90 初始分类来自 `reference/initial-grid.json`。底图指纹与网格来源标识分别校验，保留已有数据库和 JSON 的坐标兼容性。旧版三层描述对应提交 `327c7b1`，不直接套用旧的校门和天桥坐标。
 - 新地图代码在 database/pdf_map.py、visualization/pdf_map.py 和 pages/ 下四个产品页面。
 - 建筑标记可位于建筑内部，不修改通行状态；新 PDF 已有 70 个建筑及 19 个场地标记，来源和坐标位于 reference/building-markers.json，入口与地点标记分开维护，缺少入口时使用明确标注待核实的临时接入点。
-- `reference/place-entrances.json` 提供图面候选入口。候选使用 `source="map_inferred"`，保留待核实状态，缺连接道路的方向候选默认停用。已有手工入口和地图编辑在种子合并时保留。
+- `reference/place-entrances.json` 提供图面候选入口。候选使用 `source="map_inferred"`，保留待核实状态。已有手工入口和地图编辑在种子合并时保留。
+- 每个地点只维护一个入口。入口字典仍使用单元素列表以兼容 JSON 格式，旧多入口优先保留已启用且可通行的一条。A* 对固定接入点计算一次，历史快照保留原内容。
 - 旧模拟、APK/OSM 和旧图运行脚手架已清理，历史说明对应提交 `327c7b1`。
 - `visualization/workspace.py` 和 `visualization/workspace.css` 为共用地图工作台；保留 Streamlit、Plotly、SQLite 和现有 A*。地图选择和撤销只更新草稿，保存地图时在 SQLite 事务中替换整张地图。
