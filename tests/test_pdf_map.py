@@ -11,7 +11,7 @@ from PIL import Image
 from algorithms.astar import astar
 from database.pdf_map import (PDF_PATH, ROWS, COLS, EXPECTED_COUNTS, load_pdf_map,
                               initial_pdf_state, open_pdf_project, road_components,
-                              set_building_marker, merge_building_markers, merge_place_entrances,
+                              set_building_marker,
                               set_place_entrance, import_map_json, MAP_JSON_FORMAT)
 from visualization.pdf_map import pdf_map_figure
 
@@ -91,38 +91,20 @@ class PDFMapTests(unittest.TestCase):
         self.assertNotIn("portals", state)
         self.assertEqual([len(c) for c in road_components(state["grid"])], [2223, 4])
 
-    def test_marker_import_preserves_manual_coordinates_and_grid(self):
-        layout = pdf_fixture()
-        state = initial_pdf_state(layout)
-        set_building_marker(state, "已有建筑", 2, 3)
-        state["classes"][5][6] = 1
-        state["classes"][5][7] = 3
-        original_grid = [row[:] for row in state["grid"]]
-        layout["building_markers_version"] = "markers-v1"
-        layout["building_markers"] = [
-            {"name": "已有建筑", "row": 5, "col": 5, "note": "入口未设置"},
-            {"name": "新增建筑", "row": 5, "col": 6, "note": "入口未设置"},
-            {"name": "用户修改过分类的建筑", "row": 5, "col": 7, "note": "入口未设置"},
-        ]
-        self.assertTrue(merge_building_markers(state, layout))
-        self.assertEqual(state["places"]["已有建筑"], [2, 3])
-        self.assertEqual(state["places"]["新增建筑"], [5, 6])
-        self.assertNotIn("用户修改过分类的建筑", state["places"])
-        self.assertEqual(state["grid"], original_grid)
-        self.assertFalse(merge_building_markers(state, layout))
-
-    def test_existing_database_receives_missing_markers_once(self):
+    def test_initial_markers_and_entrances_only_seed_new_database(self):
         layout = pdf_fixture()
         with TemporaryDirectory() as tmp, patch("database.pdf_map.load_pdf_map", return_value=layout):
             db = Path(tmp) / "existing.db"
             _, service, revision, state = open_pdf_project(db_path=db)
             self.assertEqual(state["places"], {})
-            layout["building_markers_version"] = "markers-v1"
             layout["building_markers"] = [{"name": "示例建筑", "row": 5, "col": 5, "note": "入口未设置"}]
+            layout["place_entrances"] = [{"place": "示例建筑", "name": "候选入口", "point": [2, 2],
+                                          "enabled": True}]
             _, _, updated_revision, updated = open_pdf_project(db_path=db)
-            self.assertEqual(updated_revision, revision+1)
-            self.assertEqual(updated["places"]["示例建筑"], [5, 5])
-            self.assertEqual(open_pdf_project(db_path=db)[2], updated_revision)
+            self.assertEqual((updated_revision, updated), (revision, state))
+            _, _, _, seeded = open_pdf_project(db_path=Path(tmp) / "new.db")
+            self.assertEqual(seeded["places"]["示例建筑"], [5, 5])
+            self.assertEqual(seeded["entrances"]["示例建筑"][0]["source"], "map_inferred")
 
     @unittest.skipUnless(PDF_PATH.exists(), "需要校园地图资料")
     def test_seed_entries_are_pending_and_cover_all_places(self):
@@ -136,27 +118,6 @@ class PDFMapTests(unittest.TestCase):
             self.assertEqual(entry["source"], "map_inferred")
             self.assertEqual(state["grid"][entry["point"][0]][entry["point"][1]], 0)
         self.assertTrue(all(len(entries) == 1 for entries in state["entrances"].values()))
-
-    def test_seed_merge_preserves_manual_entries_and_skips_blocked_cells(self):
-        layout = pdf_fixture()
-        state = initial_pdf_state(layout)
-        state["places"] = {"已有地点": [5, 5], "新增地点": [5, 5], "封路地点": [5, 5]}
-        manual = {"name": "手工入口", "point": [2, 2], "enabled": True}
-        state["entrances"]["已有地点"] = [manual]
-        state["classes"][2][5], state["grid"][2][5] = 3, 1
-        layout["entrance_markers_version"] = "test-entries-v1"
-        layout["place_entrances"] = [
-            {"place": name, "name": "候选入口", "point": point,
-             "source": "map_inferred", "enabled": True}
-            for name, point in (("已有地点", [2, 3]), ("新增地点", [2, 4]), ("封路地点", [2, 5]))
-        ]
-        original_grid = [row[:] for row in state["grid"]]
-        self.assertTrue(merge_place_entrances(state, layout))
-        self.assertEqual(state["entrances"]["已有地点"], [manual])
-        self.assertEqual(state["entrances"]["新增地点"][0]["source"], "map_inferred")
-        self.assertNotIn("封路地点", state["entrances"])
-        self.assertEqual(state["grid"], original_grid)
-        self.assertFalse(merge_place_entrances(state, layout))
 
     def test_import_and_manual_edit_keep_entrance_sources_explicit(self):
         layout = pdf_fixture()

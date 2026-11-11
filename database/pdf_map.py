@@ -57,7 +57,6 @@ def load_pdf_map(pdf_path=PDF_PATH):
                 raise ValueError(f"地点标记不在对应的分类格内：{name}")
             names.add(name)
         layout["building_markers"] = markers["markers"]
-        layout["building_markers_version"] = markers["version"]
     if PLACE_ENTRANCES_PATH.exists():
         entrances = json.loads(PLACE_ENTRANCES_PATH.read_text(encoding="utf-8"))
         if entrances.get("source_hash") != layout["source_hash"]:
@@ -75,7 +74,6 @@ def load_pdf_map(pdf_path=PDF_PATH):
                 raise ValueError(f"入口候选名称、坐标或来源无效：{place}")
             names.add((place, name))
         layout["place_entrances"] = entrances["entrances"]
-        layout["entrance_markers_version"] = entrances["version"]
     return layout
 
 
@@ -114,10 +112,22 @@ def initial_pdf_state(layout):
     grid = [[0 if value == 2 else 1 for value in row] for row in classes]
     state = {"name": "校园地图", "grid": grid, "classes": classes, "places": {}, "place_status": {},
             "place_kinds": {}, "entrances": {},
-            "source": layout["source"],
-             "source_hash": layout["source_hash"], "map_version": MAP_VERSION}
-    merge_building_markers(state, layout)
-    merge_place_entrances(state, layout)
+             "source": layout["source"], "source_hash": layout["source_hash"], "map_version": MAP_VERSION}
+    for marker in layout.get("building_markers", []):
+        name = marker["name"]
+        state["places"][name] = [marker["row"], marker["col"]]
+        state["place_kinds"][name] = marker.get("kind", "建筑")
+        state["place_status"][name] = "PDF 图面定位；" + marker["note"]
+    for marker in layout.get("place_entrances", []):
+        place = marker["place"]
+        if place in state["entrances"]:
+            continue
+        state["entrances"][place] = [{
+            "name": marker["name"], "point": list(marker["point"]),
+            "enabled": marker["enabled"], "source": "map_inferred",
+        }]
+        state["place_status"][place] = state["place_status"][place].replace(
+            "入口未设置", "入口为图面推定，待核实")
     return state
 
 
@@ -181,49 +191,6 @@ def import_map_json(data, layout):
     return result
 
 
-def merge_building_markers(state, layout):
-    """首次补入图面建筑标记，保留已有同名标记和用户修改过的格子。"""
-    version = layout.get("building_markers_version")
-    if not version or state.get("building_markers_version") == version:
-        return False
-    for marker in layout.get("building_markers", []):
-        name, row, col = marker["name"], marker["row"], marker["col"]
-        kind = marker.get("kind", "建筑")
-        allowed = (0, 1, 2) if kind == "场地" else (1,)
-        if name not in state["places"] and state["classes"][row][col] in allowed:
-            state["places"][name] = [row, col]
-            state["place_status"][name] = "PDF 图面定位；" + marker["note"]
-        if name in state["places"]:
-            state.setdefault("place_kinds", {}).setdefault(name, kind)
-    state["building_markers_version"] = version
-    return True
-
-
-def merge_place_entrances(state, layout):
-    """只为尚无入口的地点补入可通行的图面候选，保留已有入口。"""
-    version = layout.get("entrance_markers_version")
-    if not version or state.get("entrance_markers_version") == version:
-        return False
-    entrances = state.setdefault("entrances", {})
-    missing = {name for name in state["places"] if not entrances.get(name)}
-    added = set()
-    for marker in layout.get("place_entrances", []):
-        row, col = marker["point"]
-        if marker["place"] in missing and state["grid"][row][col] == 0:
-            entrances.setdefault(marker["place"], []).append({
-                "name": marker["name"], "point": [row, col],
-                "enabled": marker["enabled"], "source": "map_inferred",
-            })
-            added.add(marker["place"])
-            missing.remove(marker["place"])
-    for name in added:
-        status = state.get("place_status", {}).get(name, "")
-        if status.startswith("PDF 图面定位；"):
-            state["place_status"][name] = status.replace("入口未设置", "入口为图面推定，待核实")
-    state["entrance_markers_version"] = version
-    return True
-
-
 def set_building_marker(state, name, row, col, *, old_name=None, kind="建筑"):
     """建筑位置标记可位于建筑内部；不修改可通行格，也不自动猜测入口。"""
     name = name.strip()
@@ -284,10 +251,6 @@ def open_pdf_project(pdf_path=PDF_PATH, db_path=PDF_DB_PATH):
     revision, state = service.load()
     if state.get("source_hash") != layout["source_hash"]:
         raise ValueError("已保存的地图与当前网格版本不一致")
-    building_changed = merge_building_markers(state, layout)
-    entrances_changed = merge_place_entrances(state, layout)
-    if building_changed or entrances_changed:
-        revision = service.save(state)
     return layout, service, revision, state
 
 

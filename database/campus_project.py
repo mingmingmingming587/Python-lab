@@ -9,61 +9,50 @@ import sqlite3
 
 SCHEMA = (
     """CREATE TABLE maps (
-        id INTEGER PRIMARY KEY,
+        id INTEGER PRIMARY KEY CHECK (id = 1),
         name TEXT NOT NULL,
         rows INTEGER NOT NULL CHECK (rows > 0),
         cols INTEGER NOT NULL CHECK (cols > 0),
         revision INTEGER NOT NULL CHECK (revision >= 0),
-        source TEXT,
-        source_hash TEXT,
-        map_version TEXT,
-        building_markers_version TEXT,
-        metadata TEXT NOT NULL
+        source_hash TEXT
     )""",
     """CREATE TABLE map_cells (
-        map_id INTEGER NOT NULL REFERENCES maps(id) ON DELETE CASCADE,
         row INTEGER NOT NULL CHECK (row >= 0),
         col INTEGER NOT NULL CHECK (col >= 0),
         cell_type INTEGER NOT NULL CHECK (cell_type IN (0, 1, 2, 3)),
-        PRIMARY KEY (map_id, row, col)
+        PRIMARY KEY (row, col)
     )""",
     """CREATE TABLE places (
         id INTEGER PRIMARY KEY,
-        map_id INTEGER NOT NULL REFERENCES maps(id) ON DELETE CASCADE,
-        name TEXT NOT NULL,
+        name TEXT NOT NULL UNIQUE,
         kind TEXT,
         row INTEGER NOT NULL CHECK (row >= 0),
         col INTEGER NOT NULL CHECK (col >= 0),
-        status TEXT,
-        UNIQUE (map_id, name)
+        status TEXT
     )""",
     """CREATE TABLE place_entrances (
-        id INTEGER PRIMARY KEY,
-        place_id INTEGER NOT NULL REFERENCES places(id) ON DELETE CASCADE,
+        place_id INTEGER PRIMARY KEY REFERENCES places(id) ON DELETE CASCADE,
         name TEXT NOT NULL,
         row INTEGER NOT NULL CHECK (row >= 0),
         col INTEGER NOT NULL CHECK (col >= 0),
         enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
-        source TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'map_inferred')),
-        UNIQUE (place_id, name)
+        source TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'map_inferred'))
     )""",
     """CREATE TABLE campus_route_history (
         id INTEGER PRIMARY KEY,
-        map_id INTEGER NOT NULL REFERENCES maps(id),
         created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
         start_name TEXT NOT NULL,
         goal_name TEXT NOT NULL,
         snapshot TEXT NOT NULL,
         found INTEGER NOT NULL,
         path TEXT NOT NULL,
-        visited TEXT NOT NULL,
-        path_length INTEGER,
-        expanded_count INTEGER NOT NULL
+        visited TEXT NOT NULL
     )""",
 )
 
-MAP_FIELDS = ("source", "source_hash", "map_version", "building_markers_version")
-STATE_FIELDS = {"name", "grid", "classes", "places", "place_kinds", "place_status", "entrances", *MAP_FIELDS}
+SCHEMA_VERSION = 4
+TABLES = ("maps", "map_cells", "places", "place_entrances", "campus_route_history")
+HISTORY_FIELDS = "id, created_at, start_name, goal_name, snapshot, found, path, visited"
 
 
 def _point_2d(point):
@@ -117,45 +106,67 @@ def single_entrances(entrances, grid):
 class CampusMapService:
     def __init__(self, initial_state, db_path):
         self.db_path = Path(db_path)
+        self.map_info = {key: initial_state[key] for key in ("source", "map_version") if key in initial_state}
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with closing(self._connect()) as conn, conn:
-            if conn.execute("PRAGMA user_version").fetchone()[0] == 3:
+            if conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION:
                 return
             # 建表、复制历史和移除旧表在同一个事务中完成。
             conn.execute("BEGIN IMMEDIATE")
             version = conn.execute("PRAGMA user_version").fetchone()[0]
-            if version == 3:
+            if version == SCHEMA_VERSION:
                 return
-            if version not in (0, 1, 2):
+            if version not in (0, 1, 2, 3):
                 raise ValueError("数据库结构版本不受支持")
             tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-            if "maps" not in tables:
-                self._initialize(conn, initial_state)
+            if "maps" in tables:
+                self._migrate_tables(conn, initial_state.get("source_hash"))
             else:
-                columns = {row["name"] for row in conn.execute("PRAGMA table_info(place_entrances)")}
-                if "source" not in columns:
-                    conn.execute("""ALTER TABLE place_entrances ADD COLUMN source TEXT NOT NULL
-                                    DEFAULT 'manual' CHECK (source IN ('manual', 'map_inferred'))""")
-            duplicates = conn.execute("""SELECT p.id, p.map_id FROM places p
-                JOIN place_entrances e ON e.place_id=p.id
-                GROUP BY p.id HAVING count(*) > 1""").fetchall()
-            for place in duplicates:
-                kept = conn.execute("""SELECT e.id FROM place_entrances e
-                    LEFT JOIN map_cells c ON c.map_id=? AND c.row=e.row AND c.col=e.col
-                    WHERE e.place_id=?
-                    ORDER BY (e.enabled=1 AND c.cell_type=2) DESC, e.enabled DESC, e.id
-                    LIMIT 1""", (place["map_id"], place["id"])).fetchone()[0]
-                conn.execute("DELETE FROM place_entrances WHERE place_id=? AND id<>?", (place["id"], kept))
-            for map_id in {place["map_id"] for place in duplicates}:
-                conn.execute("UPDATE maps SET revision=revision+1 WHERE id=?", (map_id,))
-            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS one_entrance_per_place ON place_entrances(place_id)")
-            conn.execute("PRAGMA user_version = 3")
+                self._initialize(conn, initial_state)
+            conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def _connect(self):
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         return conn
+
+    def _migrate_tables(self, conn, source_hash):
+        maps = conn.execute("SELECT id, source_hash FROM maps").fetchall()
+        if len(maps) != 1 or maps[0]["id"] != 1:
+            raise ValueError("只能迁移地图 ID 为 1 的单地图数据库")
+        if maps[0]["source_hash"] != source_hash:
+            raise ValueError("已保存的地图与当前网格版本不一致")
+        if conn.execute("PRAGMA foreign_key_check").fetchone():
+            raise ValueError("旧数据库存在无效关联，不能迁移")
+        for table in TABLES:
+            conn.execute(f"ALTER TABLE {table} RENAME TO legacy_{table}")
+        for statement in SCHEMA:
+            conn.execute(statement)
+        conn.execute("""INSERT INTO maps (id,name,rows,cols,revision,source_hash)
+            SELECT id,name,rows,cols,revision,source_hash FROM legacy_maps""")
+        conn.execute("""INSERT INTO map_cells (row,col,cell_type)
+            SELECT row,col,cell_type FROM legacy_map_cells""")
+        conn.execute("""INSERT INTO places (id,name,kind,row,col,status)
+            SELECT id,name,kind,row,col,status FROM legacy_places""")
+
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(legacy_place_entrances)")}
+        source = "e.source" if "source" in columns else "'manual'"
+        conn.execute(f"""INSERT INTO place_entrances (place_id,name,row,col,enabled,source)
+            SELECT place_id,name,row,col,enabled,source FROM (
+                SELECT e.place_id,e.name,e.row,e.col,e.enabled,{source} AS source,
+                    ROW_NUMBER() OVER (PARTITION BY e.place_id ORDER BY
+                        CASE WHEN e.enabled=1 AND c.cell_type=2 THEN 0
+                             WHEN e.enabled=1 THEN 1 ELSE 2 END, e.id) AS priority
+                FROM legacy_place_entrances e
+                LEFT JOIN map_cells c ON c.row=e.row AND c.col=e.col
+            ) WHERE priority=1""")
+        if conn.execute("SELECT 1 FROM legacy_place_entrances GROUP BY place_id HAVING count(*) > 1").fetchone():
+            conn.execute("UPDATE maps SET revision=revision+1 WHERE id=1")
+        conn.execute(f"""INSERT INTO campus_route_history ({HISTORY_FIELDS})
+            SELECT {HISTORY_FIELDS} FROM legacy_campus_route_history""")
+        for table in reversed(TABLES):
+            conn.execute(f"DROP TABLE legacy_{table}")
 
     def _initialize(self, conn, initial_state):
         tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -175,14 +186,12 @@ class CampusMapService:
             conn.execute("ALTER TABLE campus_route_history RENAME TO legacy_route_history")
         for statement in SCHEMA:
             conn.execute(statement)
-        conn.execute("INSERT INTO maps (id, name, rows, cols, revision, metadata) VALUES (1, ?, 1, 1, ?, '{}')",
+        conn.execute("INSERT INTO maps (id, name, rows, cols, revision) VALUES (1, ?, 1, 1, ?)",
                      ("校园地图", revision))
         self._write_map(conn, state)
         if has_history:
-            conn.execute("""INSERT INTO campus_route_history
-                (id, map_id, created_at, start_name, goal_name, snapshot, found, path, visited, path_length, expanded_count)
-                SELECT id, 1, created_at, start_name, goal_name, snapshot, found, path, visited, path_length, expanded_count
-                FROM legacy_route_history""")
+            conn.execute(f"""INSERT INTO campus_route_history ({HISTORY_FIELDS})
+                SELECT {HISTORY_FIELDS} FROM legacy_route_history""")
             conn.execute("DROP TABLE legacy_route_history")
         if legacy:
             conn.execute("DROP TABLE campus_project")
@@ -194,15 +203,12 @@ class CampusMapService:
             raise ValueError("地图分类网格必须为非空矩形")
         if state["grid"] != _walkability(classes):
             raise ValueError("分类网格与通行网格不一致，不能保存")
-        metadata = {key: value for key, value in state.items() if key not in STATE_FIELDS}
-        conn.execute("""UPDATE maps SET name=?, rows=?, cols=?, source=?, source_hash=?,
-                        map_version=?, building_markers_version=?, metadata=? WHERE id=1""",
-                     (state.get("name", "校园地图"), rows, cols, *(state.get(key) for key in MAP_FIELDS),
-                      json.dumps(metadata, ensure_ascii=False)))
-        conn.execute("DELETE FROM map_cells WHERE map_id=1")
-        conn.executemany("INSERT INTO map_cells (map_id, row, col, cell_type) VALUES (1, ?, ?, ?)",
+        conn.execute("UPDATE maps SET name=?, rows=?, cols=?, source_hash=? WHERE id=1",
+                     (state.get("name", "校园地图"), rows, cols, state.get("source_hash")))
+        conn.execute("DELETE FROM map_cells")
+        conn.executemany("INSERT INTO map_cells (row, col, cell_type) VALUES (?, ?, ?)",
                          ((r, c, value) for r, row in enumerate(classes) for c, value in enumerate(row)))
-        conn.execute("DELETE FROM places WHERE map_id=1")
+        conn.execute("DELETE FROM places")
         kinds, statuses = state.get("place_kinds", {}), state.get("place_status", {})
         entrances = state.get("entrances", {})
         if entrances.keys() - state["places"].keys():
@@ -211,7 +217,7 @@ class CampusMapService:
         for name, (row, col) in state["places"].items():
             if not (0 <= row < rows and 0 <= col < cols):
                 raise ValueError(f"地点坐标超出地图：{name}")
-            cursor = conn.execute("INSERT INTO places (map_id, name, kind, row, col, status) VALUES (1, ?, ?, ?, ?, ?)",
+            cursor = conn.execute("INSERT INTO places (name, kind, row, col, status) VALUES (?, ?, ?, ?, ?)",
                                   (name, kinds.get(name), row, col, statuses.get(name)))
             for entry in entrances.get(name, []):
                 row, col = entry["point"]
@@ -230,18 +236,19 @@ class CampusMapService:
                 raise ValueError("地图尚未初始化")
             rows, cols = map_row["rows"], map_row["cols"]
             classes = [[0] * cols for _ in range(rows)]
-            cells = conn.execute("SELECT row, col, cell_type FROM map_cells WHERE map_id=1").fetchall()
+            cells = conn.execute("SELECT row, col, cell_type FROM map_cells").fetchall()
             if len(cells) != rows * cols:
                 raise ValueError("地图网格记录不完整")
             for row, col, cell_type in cells:
                 if not (0 <= row < rows and 0 <= col < cols):
                     raise ValueError("地图网格坐标超出地图")
                 classes[row][col] = cell_type
-            state = json.loads(map_row["metadata"])
+            state = self.map_info.copy()
             state.update(name=map_row["name"], classes=classes, grid=_walkability(classes),
                          places={}, place_kinds={}, place_status={}, entrances={})
-            state.update({key: map_row[key] for key in MAP_FIELDS if map_row[key] is not None})
-            for place in conn.execute("SELECT * FROM places WHERE map_id=1 ORDER BY id"):
+            if map_row["source_hash"] is not None:
+                state["source_hash"] = map_row["source_hash"]
+            for place in conn.execute("SELECT * FROM places ORDER BY id"):
                 name = place["name"]
                 state["places"][name] = [place["row"], place["col"]]
                 if place["kind"] is not None:
@@ -250,7 +257,7 @@ class CampusMapService:
                     state["place_status"][name] = place["status"]
             for entry in conn.execute("""SELECT p.name AS place_name, e.name, e.row, e.col, e.enabled, e.source
                 FROM place_entrances AS e JOIN places AS p ON e.place_id=p.id
-                WHERE p.map_id=1 ORDER BY e.id"""):
+                ORDER BY p.id"""):
                 entrance = {
                     "name": entry["name"], "point": [entry["row"], entry["col"]], "enabled": bool(entry["enabled"]),
                 }
@@ -272,14 +279,14 @@ class CampusMapService:
         state = _state_2d(state)
         with closing(self._connect()) as conn, conn:
             conn.execute("""INSERT INTO campus_route_history
-                (map_id,start_name,goal_name,snapshot,found,path,visited,path_length,expanded_count)
-                VALUES (1,?,?,?,?,?,?,?,?)""",
+                (start_name,goal_name,snapshot,found,path,visited)
+                VALUES (?,?,?,?,?,?)""",
                 (start, goal, json.dumps(state, ensure_ascii=False), int(result.found),
-                 json.dumps(result.path), json.dumps(result.visited_order), result.path_length, result.expanded_count))
+                 json.dumps(result.path), json.dumps(result.visited_order)))
 
     def history(self):
         with closing(self._connect()) as conn:
-            rows = conn.execute("SELECT * FROM campus_route_history WHERE map_id=1 ORDER BY id DESC").fetchall()
+            rows = conn.execute("SELECT * FROM campus_route_history ORDER BY id DESC").fetchall()
         result = []
         for row in rows:
             item = dict(row)
@@ -288,5 +295,7 @@ class CampusMapService:
             item["snapshot"] = _state_2d(item["snapshot"])
             for field in ("path", "visited"):
                 item[field] = [_point_2d(point) for point in item[field]]
+            item["path_length"] = len(item["path"]) - 1 if item["found"] else None
+            item["expanded_count"] = len(item["visited"])
             result.append(item)
         return result
