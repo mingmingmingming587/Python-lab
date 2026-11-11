@@ -4,7 +4,7 @@
 
 - 面向 Python 初学者开发校园地图与最短路径查询 Web 应用；优先使用简单、易理解的实现。
 - 使用 Python、Streamlit、SQLite 和 Plotly。以真实校园为原型维护可编辑网格、地点和查询记录。
-- 核心路径搜索自主实现 A*；四方向、单位步长、曼哈顿距离是当前约定。BFS、实时定位和自动播放属于后续可选功能。
+- 核心路径搜索自主实现 A*，采用四方向、单位步长和曼哈顿距离。搜索过程可播放，测试用 BFS 对照最短步数。
 - 真实道路、建筑入口及地图数据应标注来源和核实状态；不要把未核实的路线描述为实际可安全通行。
 
 ## 分工与接口
@@ -22,12 +22,11 @@
 - 修改前先检查工作区和相关代码，保留他人的未提交工作；不要擅自提交、推送或删除分支。
 - 按变更范围运行适当的检查；报告实际完成的功能与仍为占位的部分。
 
-## experiment 当前实现
+## 地图实现
 
-- 当前底图为 `reference/campus-map-basemap.pdf`，180×90 初始分类来自 `reference/initial-grid.json`。底图指纹与网格来源标识分别校验，保留已有数据库和 JSON 的坐标兼容性。旧版三层描述对应提交 `327c7b1`，不直接套用旧的校门和天桥坐标。
-- 新地图代码在 database/pdf_map.py、visualization/pdf_map.py 和 pages/ 下四个产品页面。
+- 底图为 `reference/campus-map-basemap.pdf`，180×90 初始分类来自 `reference/initial-grid.json`。底图指纹与网格来源标识分别校验。
+- 地图代码在 `database/pdf_map.py`、`visualization/pdf_map.py` 和 `pages/` 下的四个页面。
 - 建筑标记可位于建筑内部，不修改通行状态；新 PDF 已有 70 个建筑及 19 个场地标记，来源和坐标位于 reference/building-markers.json，入口与地点标记分开维护，缺少入口时使用明确标注待核实的临时接入点。
 - `reference/place-entrances.json` 提供图面候选入口。候选使用 `source="map_inferred"`，保留待核实状态。初始资料在建库或手动恢复时加载，已有数据库读取已保存的地图。
-- 每个地点只维护一个入口。入口字典仍使用单元素列表以兼容 JSON 格式，旧多入口优先保留已启用且可通行的一条。A* 对固定接入点计算一次，历史快照保留原内容。
-- 旧模拟、APK/OSM 和旧图运行脚手架已清理，历史说明对应提交 `327c7b1`。
+- 每个地点最多维护一个入口，使用单元素列表保存。A* 对固定接入点计算一次，历史回放使用查询快照。
 - `visualization/workspace.py` 和 `visualization/workspace.css` 为共用地图工作台；保留 Streamlit、Plotly、SQLite 和现有 A*。地图选择和撤销只更新草稿，保存地图时在 SQLite 事务中替换整张地图。

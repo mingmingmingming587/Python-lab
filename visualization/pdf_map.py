@@ -14,8 +14,8 @@ def _name_positions(points, names, cell_pixels):
     """尝试八个方向放名称，优先减少文字重叠和超出图面。"""
     height, gap = 15/cell_pixels, 8/cell_pixels
     occupied, positions = [], ["top center"] * len(points)
-    for index in sorted(range(len(points)),key=lambda i:points[i][-2:]):
-        row,col = points[index][-2:]
+    for index in sorted(range(len(points)),key=lambda i:points[i]):
+        row,col = points[index]
         x,y = col+.5,row+.5
         width = (sum(.55 if ord(c)<128 else 1 for c in names[index])*12+4)/cell_pixels
         candidates = [
@@ -42,7 +42,7 @@ def _name_positions(points, names, cell_pixels):
 
 
 def _overlay(fig, points, name, color, show_grid=False):
-    points = {(p[-2], p[-1]) for p in points}
+    points = {tuple(point) for point in points}
     if not points:
         return
     fig.add_trace(go.Heatmap(
@@ -117,8 +117,8 @@ def pdf_map_figure(layout, state, start=None, goal=None, result=None, step=None,
         for point, label, color in ((start,"起点","#15803d"),(goal,"终点","#be123c"),
                                     (selected,"所选地点","#7c3aed")):
             if point is not None:
-                highlighted[tuple(point[-2:])] = label, color
-        point_colors = [highlighted.get(tuple(p[-2:]),("", "#475569"))[1] for p in points]
+                highlighted[tuple(point)] = label, color
+        point_colors = [highlighted.get(tuple(p),("", "#475569"))[1] for p in points]
         fig.add_trace(go.Scatter(
             x=[p[1]+.5 for p in points], y=[p[0]+.5 for p in points],
             mode="markers+text" if show_building_labels else "markers",
@@ -128,15 +128,15 @@ def pdf_map_figure(layout, state, start=None, goal=None, result=None, step=None,
                           shadow="0 0 3px white, 0 0 3px white, 0 0 2px white"),
             cliponaxis=False,
             customdata=[[*p,kind,name] for p,kind,name in zip(points,kinds,names)],
-            marker=dict(size=[11 if tuple(p[-2:]) in highlighted else 7 for p in points],
+            marker=dict(size=[11 if tuple(p) in highlighted else 7 for p in points],
                         color=point_colors, symbol="circle",
                         line=dict(color="white",width=1)),
             name="地点位置标记",
             hovertemplate="%{text} · %{customdata[2]}<br>行 %{customdata[0]}，列 %{customdata[1]}<br>地点中心与导航入口分开<extra></extra>"))
         if not show_building_labels:
             for name,p in zip(names,points):
-                if tuple(p[-2:]) in highlighted:
-                    label,color = highlighted[tuple(p[-2:])]
+                if tuple(p) in highlighted:
+                    label,color = highlighted[tuple(p)]
                     fig.add_annotation(x=p[1]+.5,y=p[0]+.5,
                         text=escape(label+" · "+name),showarrow=False,yshift=18,
                         font=dict(size=11,color=color),bgcolor="rgba(255,255,255,.94)",
@@ -180,7 +180,7 @@ def pdf_map_figure(layout, state, start=None, goal=None, result=None, step=None,
         if not review_cells and result and result.found:
             points += result.path
         if points:
-            cols,rows = [p[-1] for p in points],[p[-2] for p in points]
+            rows, cols = zip(*points)
             x_range = [max(0,min(cols)-8),min(COLS,max(cols)+9)]
             y_range = [min(ROWS,max(rows)+13),max(0,min(rows)-12)]
     fig.update_xaxes(range=x_range, visible=show_grid, title="列（0～89）", side="top", dtick=10,

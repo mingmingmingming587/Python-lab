@@ -126,6 +126,10 @@ class PDFMapTests(unittest.TestCase):
         set_place_entrance(state, "图书馆", "候选门", 2, 2, source="map_inferred")
         imported = import_map_json(json.dumps({"format": MAP_JSON_FORMAT, "state": state}), layout)
         self.assertEqual(imported["entrances"], state["entrances"])
+        self.assertNotIn("map_version", imported)
+        with self.assertRaisesRegex(ValueError, "网格来源"):
+            import_map_json(json.dumps({"format": MAP_JSON_FORMAT, "state": state}),
+                            {**layout, "source_hash": "different"})
         set_place_entrance(state, "图书馆", "手工门", 2, 3)
         self.assertEqual(len(state["entrances"]["图书馆"]), 1)
         self.assertNotIn("source", state["entrances"]["图书馆"][0])
@@ -133,7 +137,7 @@ class PDFMapTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "入口"):
             import_map_json(json.dumps({"format": MAP_JSON_FORMAT, "state": state}), layout)
 
-    def test_legacy_json_keeps_one_available_entrance(self):
+    def test_map_json_rejects_multiple_entrances(self):
         layout = pdf_fixture()
         state = initial_pdf_state(layout)
         state["places"] = {"图书馆": [5, 5]}
@@ -142,8 +146,8 @@ class PDFMapTests(unittest.TestCase):
             {"name": "受阻", "point": [5, 5], "enabled": True},
             {"name": "保留", "point": [2, 3], "enabled": True},
         ]}
-        imported = import_map_json(json.dumps({"format": MAP_JSON_FORMAT, "state": state}), layout)
-        self.assertEqual([e["name"] for e in imported["entrances"]["图书馆"]], ["保留"])
+        with self.assertRaisesRegex(ValueError, "每个地点最多设置一个入口"):
+            import_map_json(json.dumps({"format": MAP_JSON_FORMAT, "state": state}), layout)
 
     def test_save_route_snapshot_and_source_mismatch(self):
         layout = pdf_fixture()

@@ -9,11 +9,10 @@ def access_points(state, name):
     grid = state["grid"]
     configured = state.get("entrances", {}).get(name, [])
     if configured:
-        available = [e for e in configured if e.get("enabled", True) and
-                     grid[e["point"][0]][e["point"][1]] == 0]
-        if not available:
+        entry, = configured
+        row, col = entry["point"]
+        if not entry.get("enabled", True) or grid[row][col] != 0:
             raise ValueError(f"{name} 没有当前可用的已指定入口")
-        entry = available[0]
         return [{**entry, "temporary": entry.get("source") == "map_inferred"}]
     row, col = state["places"][name]
     roads = [(abs(r-row)+abs(c-col), r, c) for r, line in enumerate(grid)

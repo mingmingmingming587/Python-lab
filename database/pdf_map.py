@@ -11,7 +11,7 @@ from pathlib import Path
 import pymupdf
 from PIL import Image
 
-from database.campus_project import CampusMapService, single_entrances
+from database.campus_project import CampusMapService
 
 ROOT = Path(__file__).resolve().parents[1]
 PDF_PATH = ROOT / "reference" / "campus-map-basemap.pdf"
@@ -21,7 +21,6 @@ BUILDING_MARKERS_PATH = ROOT / "reference" / "building-markers.json"
 PLACE_ENTRANCES_PATH = ROOT / "reference" / "place-entrances.json"
 ROWS, COLS = 180, 90
 MAP_JSON_FORMAT = "campuspath-integrated-1"
-MAP_VERSION = "integrated-180x90"
 CLASS_NAMES = ("未标注", "建筑", "道路", "边界")
 EXPECTED_COUNTS = {0: 10491, 1: 2689, 2: 2227, 3: 793}
 
@@ -44,7 +43,7 @@ def load_pdf_map(pdf_path=PDF_PATH):
     if BUILDING_MARKERS_PATH.exists():
         markers = json.loads(BUILDING_MARKERS_PATH.read_text(encoding="utf-8"))
         if markers.get("source_hash") != layout["source_hash"]:
-            raise ValueError("建筑标记与当前网格版本不对应，停止加载")
+            raise ValueError("建筑标记与校园网格不对应，停止加载")
         names = set()
         for point in markers["markers"]:
             name, row, col = point["name"], point["row"], point["col"]
@@ -60,7 +59,7 @@ def load_pdf_map(pdf_path=PDF_PATH):
     if PLACE_ENTRANCES_PATH.exists():
         entrances = json.loads(PLACE_ENTRANCES_PATH.read_text(encoding="utf-8"))
         if entrances.get("source_hash") != layout["source_hash"]:
-            raise ValueError("入口候选与当前网格版本不对应，停止加载")
+            raise ValueError("入口候选与校园网格不对应，停止加载")
         places = {marker["name"] for marker in layout.get("building_markers", [])}
         names = set()
         for entry in entrances["entrances"]:
@@ -80,12 +79,10 @@ def load_pdf_map(pdf_path=PDF_PATH):
 @lru_cache(maxsize=2)
 def _load_pdf_map(path, modified, size, grid_modified, grid_size):
     initial = json.loads(INITIAL_GRID_PATH.read_text(encoding="utf-8"))
-    if initial.get("map_version") != MAP_VERSION:
-        raise ValueError("初始网格版本不受支持")
     classes = initial["classes"]
     _validate_classes(classes)
     if Counter(v for row in classes for v in row) != EXPECTED_COUNTS:
-        raise ValueError("初始网格分类数量已改变，请检查资料版本")
+        raise ValueError("初始网格分类数量与资料不符")
     data = Path(path).read_bytes()
     background_hash = sha256(data).hexdigest()
     if background_hash != initial["basemap"]["sha256"]:
@@ -112,7 +109,7 @@ def initial_pdf_state(layout):
     grid = [[0 if value == 2 else 1 for value in row] for row in classes]
     state = {"name": "校园地图", "grid": grid, "classes": classes, "places": {}, "place_status": {},
             "place_kinds": {}, "entrances": {},
-             "source": layout["source"], "source_hash": layout["source_hash"], "map_version": MAP_VERSION}
+            "source": layout["source"], "source_hash": layout["source_hash"]}
     for marker in layout.get("building_markers", []):
         name = marker["name"]
         state["places"][name] = [marker["row"], marker["col"]]
@@ -146,10 +143,8 @@ def import_map_json(data, layout):
     if not isinstance(export, dict) or export.get("format") != MAP_JSON_FORMAT:
         raise ValueError("地图 JSON 格式不受支持。")
     state = export.get("state")
-    if not isinstance(state, dict) or (state.get("source_hash"), state.get("map_version")) != (
-        layout["source_hash"], MAP_VERSION
-    ):
-        raise ValueError("地图 JSON 与当前网格版本不一致。")
+    if not isinstance(state, dict) or state.get("source_hash") != layout["source_hash"]:
+        raise ValueError("地图 JSON 与校园网格来源不一致。")
     classes = state.get("classes")
     _validate_classes(classes)
 
@@ -169,25 +164,23 @@ def import_map_json(data, layout):
     if not isinstance(entrances, dict) or entrances.keys() - places.keys():
         raise ValueError("地图 JSON 包含未关联地点的入口。")
     for place, entries in entrances.items():
-        if not isinstance(entries, list):
-            raise ValueError(f"入口列表无效：{place}")
-        names = set()
+        if not isinstance(entries, list) or len(entries) > 1:
+            raise ValueError(f"每个地点最多设置一个入口：{place}")
         for entry in entries:
             name = entry.get("name") if isinstance(entry, dict) else None
-            if (not isinstance(name, str) or not name.strip() or name in names
+            if (not isinstance(name, str) or not name.strip()
                     or not _valid_map_point(entry.get("point"))
                     or type(entry.get("enabled")) is not bool
                     or entry.get("source", "manual") not in ("manual", "map_inferred")):
                 raise ValueError(f"入口名称、坐标或启用状态无效：{place}")
-            names.add(name)
 
     result = initial_pdf_state(layout)
     name = state.get("name", result["name"])
     if not isinstance(name, str) or not name.strip():
         raise ValueError("地图名称无效。")
     result.update(name=name, classes=classes, grid=[[0 if cell == 2 else 1 for cell in row] for row in classes],
-                  places=places, place_kinds=kinds, place_status=statuses, entrances=entrances)
-    result["entrances"] = single_entrances(entrances, result["grid"])
+                  places=places, place_kinds=kinds, place_status=statuses,
+                  entrances={place: entries for place, entries in entrances.items() if entries})
     return result
 
 
@@ -250,7 +243,7 @@ def open_pdf_project(pdf_path=PDF_PATH, db_path=PDF_DB_PATH):
     service = CampusMapService(initial_pdf_state(layout), db_path)
     revision, state = service.load()
     if state.get("source_hash") != layout["source_hash"]:
-        raise ValueError("已保存的地图与当前网格版本不一致")
+        raise ValueError("已保存的地图与校园网格来源不一致")
     return layout, service, revision, state
 
 

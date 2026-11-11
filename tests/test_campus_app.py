@@ -289,10 +289,6 @@ class CampusAppTests(unittest.TestCase):
 
     def test_default_map_text_and_scale_survive_mode_switch(self):
         nav = self.page("navigation.py")
-        nav.session_state["show_background"] = False
-        nav.session_state["show_labels"] = False
-        nav.session_state["map_text_defaults_applied"] = False
-        nav.run()
         self.assertTrue(next(c for c in nav.checkbox if c.label=="显示 PDF 对照底图").value)
         self.assertTrue(next(c for c in nav.checkbox if c.label=="显示全部地点名称").value)
         self.assertEqual(next(r for r in nav.radio if r.label=="地图尺度").value,"清晰浏览")

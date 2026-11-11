@@ -172,7 +172,7 @@ def _draft_controls(saved, service):
     st.rerun()
 
 
-def _header(state, revision, pending=False):
+def _header(state, pending=False):
     roads = sum(v == 0 for line in state["grid"] for v in line)
     status = "有未保存修改" if pending else "已加载"
     st.html(Path(__file__).with_name("workspace.css").read_text(encoding="utf-8"))
@@ -181,7 +181,7 @@ def _header(state, revision, pending=False):
         <div><h1>校园地图</h1><p>CampusPath · 应急管理大学</p></div></div>
       <div class="campus-stats"><span><b>{ROWS} × {COLS}</b> 网格</span>
         <span><b>{len(state['places'])}</b> 地点</span><span><b>{roads:,}</b> 道路格</span></div>
-      <div class="campus-status"><i></i> {status} · 版本 {revision}<small>图面数据 · 入口待核实</small></div>
+      <div class="campus-status"><i></i> {status}<small>图面数据 · 入口待核实</small></div>
     </header>''')
 
 
@@ -259,7 +259,7 @@ def _navigation(state, service, revision):
                 st.rerun()
             for side,label in (("start","起点"),("goal","终点")):
                 entry = route[side+"_access"]
-                st.caption(f"{label}接入：{entry['name']} · {tuple(entry['point'][-2:])}" +
+                st.caption(f"{label}接入：{entry['name']} · {tuple(entry['point'])}" +
                            (" · 待核实" if entry["temporary"] else " · 手动指定"))
         view.update(result=result,access_start=route["start_access"]["point"],
                     access_goal=route["goal_access"]["point"])
@@ -382,7 +382,7 @@ def _confirm_restore(state, initial):
     if confirm.button("确认恢复", type="primary", width="stretch"):
         _close_restore_dialog()
         if initial == state:
-            st.session_state.notice = "当前地图已是初始版本。"
+            st.session_state.notice = "当前地图已是初始状态。"
             st.rerun()
         _stage_edit(state, initial)
 
@@ -460,17 +460,6 @@ def render_workspace(default_mode="导航"):
                 "map_scale":"清晰浏览"}
     for key,value in defaults.items():
         ss.setdefault(key,value)
-    if not ss.get("coordinates_2d_applied"):
-        # 旧浏览器会话中的路线仍可能使用三维坐标，需重新查询。
-        ss.pop("nav_route", None)
-        ss.playing = False
-        ss.coordinates_2d_applied = True
-    if not ss.get("map_text_defaults_applied"):
-        # 为已经打开的旧会话恢复文字；之后仍尊重使用者手动切换的选项。
-        ss.show_background = ss.show_labels = True
-        ss.map_scale = "清晰浏览"
-        ss.view_revision += 1
-        ss.map_text_defaults_applied = True
     if ss.get("entry_mode") != default_mode:
         ss.entry_mode = default_mode
         ss.workspace_mode = default_mode
@@ -484,7 +473,7 @@ def render_workspace(default_mode="导航"):
     draft = ss.get("map_draft")
     pending = draft is not None and draft["state"] != state
     display_state = draft["state"] if editing and draft else state
-    _header(display_state,revision,pending)
+    _header(display_state,pending)
     if pending:
         if mode == "导航":
             st.warning("有未保存修改，当前导航使用已保存地图。返回维护可继续编辑草稿。")
