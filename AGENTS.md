@@ -4,13 +4,13 @@
 
 - 面向 Python 初学者开发校园地图与最短路径查询 Web 应用；优先使用简单、易理解的实现。
 - 使用 Python、Streamlit、SQLite 和 Plotly。以真实校园为原型维护可编辑网格、地点和查询记录。
-- 核心路径搜索自主实现 A*，采用四方向、单位步长和曼哈顿距离。搜索过程可播放，测试用 BFS 对照最短步数。
+- 核心路径搜索自主实现 A*，采用四方向、单位步长和曼哈顿距离。搜索过程可播放。
 - 真实道路、建筑入口及地图数据应标注来源和核实状态；不要把未核实的路线描述为实际可安全通行。
 
 ## 分工与接口
 
 - 地图与数据库：`feature/map-management`，主要在 `database/` 和地图管理页面工作。
-- A* 与测试：`feature/path-planning`，主要在 `algorithms/` 和 `tests/` 工作。
+- A* 路径规划：`feature/path-planning`，主要在 `algorithms/` 工作。
 - 导航与可视化：`feature/navigation-ui`，主要在 `pages/` 和 `visualization/` 工作。
 - 共同开发基线为 `main`。修改公共数据格式或接口前先查看 `docs/新PDF地图.md`，并在变更时同步更新说明。
 - 网格使用 `0` 表示可通行、`1` 表示障碍物。当前地图和路径坐标均为二维 `(row, col)`，地图、算法和页面应使用一致的数据。

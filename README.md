@@ -62,12 +62,6 @@
 | `pages/navigation.py`、`pages/map_management.py`、`pages/route_history.py`、`pages/road_review.py` | 保留原访问地址，进入对应的工作台模式 |
 | `docs/新PDF地图.md` | 地图数据、接口、入口和工作台说明 |
 
-运行检查：
-
-```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests -p 'test_*.py' -q
-```
-
 ## 地图呈现
 
 默认显示校园底图与地点名称，地点统一用圆点表示，路线仍使用有色格子。“清晰浏览”采用较大的图面，在地图区域上下滚动可读原图及地点文字；工具栏固定在滚动区外。“图层与布局”可切换“全校总览”、PDF 对照、细网格与坐标、全部名称、聚焦和宽度；这些设置在会话内共用。全校总览用于看整体布局，密集区域建议使用清晰浏览或缩放查看。可以点击地点设置起终点，或先选“设起点 / 设终点”工具再点地点圆点。
