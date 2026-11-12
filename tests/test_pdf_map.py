@@ -1,7 +1,9 @@
 from collections import Counter
+from contextlib import closing
 from io import BytesIO
 import json
 from pathlib import Path
+import sqlite3
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
@@ -98,7 +100,7 @@ class PDFMapTests(unittest.TestCase):
             _, service, revision, state = open_pdf_project(db_path=db)
             self.assertEqual(state["places"], {})
             layout["building_markers"] = [{"name": "示例建筑", "row": 5, "col": 5, "note": "入口未设置"}]
-            layout["place_entrances"] = [{"place": "示例建筑", "name": "候选入口", "point": [2, 2],
+            layout["entrance_markers"] = [{"place": "示例建筑", "name": "候选入口", "point": [2, 2],
                                           "enabled": True}]
             _, _, updated_revision, updated = open_pdf_project(db_path=db)
             self.assertEqual((updated_revision, updated), (revision, state))
@@ -137,17 +139,38 @@ class PDFMapTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "入口"):
             import_map_json(json.dumps({"format": MAP_JSON_FORMAT, "state": state}), layout)
 
-    def test_map_json_rejects_multiple_entrances(self):
+    def test_map_json_enforces_one_entrance_per_place(self):
         layout = pdf_fixture()
         state = initial_pdf_state(layout)
         state["places"] = {"图书馆": [5, 5]}
-        state["entrances"] = {"图书馆": [
-            {"name": "停用", "point": [2, 2], "enabled": False},
-            {"name": "受阻", "point": [5, 5], "enabled": True},
-            {"name": "保留", "point": [2, 3], "enabled": True},
-        ]}
+        entry = {"name": "入口", "point": [2, 2], "enabled": True}
+        state["entrances"] = {"图书馆": [entry, entry.copy()]}
         with self.assertRaisesRegex(ValueError, "每个地点最多设置一个入口"):
             import_map_json(json.dumps({"format": MAP_JSON_FORMAT, "state": state}), layout)
+
+    def test_places_and_optional_entrances_survive_reopening(self):
+        layout = pdf_fixture()
+        with TemporaryDirectory() as tmp, patch("database.pdf_map.load_pdf_map", return_value=layout):
+            db = Path(tmp) / "campus.db"
+            _, service, _, state = open_pdf_project(db_path=db)
+            state["places"] = {"未设入口": [5, 5], "手工入口": [5, 5], "图面候选": [5, 5]}
+            set_place_entrance(state, "手工入口", "西门", 2, 2, enabled=False)
+            set_place_entrance(state, "图面候选", "东门", 2, 3, source="map_inferred")
+            service.save(state)
+            service.save_route("手工入口", "图面候选", state, astar(state["grid"], (2, 2), (2, 3)))
+            before, history = service.load(), service.history()
+
+            _, reopened, revision, loaded = open_pdf_project(db_path=db)
+            self.assertEqual((revision, loaded), before)
+            self.assertEqual(reopened.history(), history)
+            with closing(sqlite3.connect(db)) as conn:
+                self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 5)
+                entrances = conn.execute("SELECT entrance_name, entrance_enabled, entrance_source "
+                                         "FROM places ORDER BY id").fetchall()
+                self.assertEqual(entrances, [(None, None, None), ("西门", 0, "manual"),
+                                             ("东门", 1, "map_inferred")])
+                tables = {name for name, in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                self.assertEqual(tables, {"maps", "map_cells", "places", "campus_route_history"})
 
     def test_save_route_snapshot_and_source_mismatch(self):
         layout = pdf_fixture()
@@ -208,15 +231,15 @@ class PDFMapTests(unittest.TestCase):
         self.assertEqual(len(figure.layout.images),1)
         self.assertEqual(state["grid"],original)
 
-    def test_multiple_entrances_show_status_without_changing_the_grid(self):
+    def test_entrance_markers_show_status_without_changing_the_grid(self):
         layout = pdf_fixture()
         state = initial_pdf_state(layout)
-        state["places"] = {"图书馆": [5, 5]}
-        state["entrances"] = {"图书馆": [
-            {"name": "东门", "point": [2, 2], "enabled": True},
-            {"name": "西门", "point": [2, 3], "enabled": False},
-            {"name": "北门", "point": [5, 5], "enabled": True},
-        ]}
+        state["places"] = {"图书馆": [5, 5], "教学楼": [2, 5], "体育馆": [2, 6]}
+        set_place_entrance(state, "图书馆", "东门", 2, 2)
+        set_place_entrance(state, "教学楼", "西门", 2, 3, enabled=False)
+        set_place_entrance(state, "体育馆", "北门", 2, 4)
+        state["classes"][2][4] = 3
+        state["grid"][2][4] = 1
         before = [row[:] for row in state["grid"]]
         figure = pdf_map_figure(layout, state)
         trace = next(trace for trace in figure.data if trace.name == "已录入入口")

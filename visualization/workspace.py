@@ -9,7 +9,7 @@ from pathlib import Path
 import streamlit as st
 
 from algorithms.path_result import PathResult
-from algorithms.place_navigation import access_points, plan_named_route
+from algorithms.place_navigation import access_point, plan_named_route
 from database.pdf_map import (CLASS_NAMES, COLS, MAP_JSON_FORMAT, ROWS, import_map_json,
                               initial_pdf_state, open_pdf_project,
                               road_components, set_building_marker,
@@ -206,11 +206,11 @@ def _navigation(state, service, revision):
     st.button("交换起点与终点", on_click=_swap_endpoints, width="stretch")
     start, goal = (ss.nav_start if names else None), (ss.nav_goal if names else None)
     ready = bool(start and goal)
-    entries = {}
     if ready:
         try:
-            entries = {"start": access_points(state,start), "goal": access_points(state,goal)}
-            if any(entry["temporary"] for items in entries.values() for entry in items):
+            start_access = access_point(state, start)
+            goal_access = access_point(state, goal)
+            if start_access["temporary"] or goal_access["temporary"]:
                 st.warning("本次导航包含图面推定或临时接入点，入口位置与实际通行情况待核实。")
         except ValueError as error:
             st.error(str(error))
@@ -414,7 +414,10 @@ def _maintenance(layout, state):
     with st.expander("导入、导出与恢复地图"):
         st.caption("导入和恢复会替换当前草稿，可用 Ctrl+Z 撤销。保存地图后生效。")
         uploaded = st.file_uploader("选择地图 JSON", type="json", max_upload_size=2)
-        if st.button("导入 JSON 地图", disabled=uploaded is None, width="stretch"):
+        import_clicked = st.button("导入 JSON 地图", width="stretch")
+        if import_clicked and uploaded is None:
+            st.warning("请先在上方选择地图 JSON 文件。")
+        elif import_clicked:
             try:
                 imported = import_map_json(uploaded.getvalue(), layout)
             except ValueError as error:

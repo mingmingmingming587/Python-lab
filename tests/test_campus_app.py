@@ -246,6 +246,12 @@ class CampusAppTests(unittest.TestCase):
         edited["classes"][2][2] = 3
         # A blocked entrance stays recorded. The imported grid comes from classes.
         edit = self.page("road_review.py")
+        import_button = next(b for b in edit.button if b.label == "导入 JSON 地图")
+        self.assertFalse(import_button.disabled)
+        import_button.click().run()
+        self.assertTrue(any("请先在上方选择地图 JSON 文件" in item.value for item in edit.warning))
+        self.assertNotIn("map_draft", edit.session_state)
+
         edit.file_uploader[0].set_value(("broken.json", b"{}", "application/json")).run()
         next(b for b in edit.button if b.label == "导入 JSON 地图").click().run()
         self.assertTrue(edit.error)

@@ -143,23 +143,23 @@ def pdf_map_figure(layout, state, start=None, goal=None, result=None, step=None,
                         bordercolor=color,borderpad=4,
                         xanchor="left" if p[1]<10 else "right" if p[1]>80 else "center")
     entrances = []
-    for place, items in state.get("entrances", {}).items():
-        if place not in state["places"]:
+    for place, entries in state.get("entrances", {}).items():
+        if place not in state["places"] or not entries:
             continue
-        for entry in items:
-            row, col = entry["point"]
-            if not (0 <= row < ROWS and 0 <= col < COLS):
-                continue
-            inferred = entry.get("source") == "map_inferred"
-            provenance = "图面推定，待核实" if inferred else "手动录入，实际情况待核实"
-            if not entry.get("enabled", True):
-                status, color, symbol = "已停用", "#64748b", "square-open"
-            elif state["grid"][row][col] != 0:
-                status, color, symbol = "道路不可通行", "#ea580c", "diamond"
-            else:
-                status, color = "已启用", "#0f766e"
-                symbol = "square-open" if inferred else "square"
-            entrances.append((place, entry["name"], row, col, status, color, symbol, provenance))
+        entry, = entries
+        row, col = entry["point"]
+        if not (0 <= row < ROWS and 0 <= col < COLS):
+            continue
+        inferred = entry.get("source") == "map_inferred"
+        provenance = "图面推定，待核实" if inferred else "手动录入，实际情况待核实"
+        if not entry.get("enabled", True):
+            status, color, symbol = "已停用", "#64748b", "square-open"
+        elif state["grid"][row][col] != 0:
+            status, color, symbol = "道路不可通行", "#ea580c", "diamond"
+        else:
+            status, color = "已启用", "#0f766e"
+            symbol = "square-open" if inferred else "square"
+        entrances.append((place, entry["name"], row, col, status, color, symbol, provenance))
     if entrances:
         fig.add_trace(go.Scatter(
             x=[col+.5 for _, _, _, col, _, _, _, _ in entrances],

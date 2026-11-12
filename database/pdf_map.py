@@ -61,18 +61,18 @@ def load_pdf_map(pdf_path=PDF_PATH):
         if entrances.get("source_hash") != layout["source_hash"]:
             raise ValueError("入口候选与校园网格不对应，停止加载")
         places = {marker["name"] for marker in layout.get("building_markers", [])}
-        names = set()
+        assigned_places = set()
         for entry in entrances["entrances"]:
             place, name, point = entry["place"], entry["name"], entry["point"]
             if (place not in places or not isinstance(name, str) or not name.strip()
-                    or (place, name) in names or not _valid_map_point(point)
+                    or place in assigned_places or not _valid_map_point(point)
                     or layout["classes"][point[0]][point[1]] != 2
                     or entry.get("source") != "map_inferred"
                     or type(entry.get("enabled")) is not bool
                     or not isinstance(entry.get("note"), str) or not entry["note"].strip()):
                 raise ValueError(f"入口候选名称、坐标或来源无效：{place}")
-            names.add((place, name))
-        layout["place_entrances"] = entrances["entrances"]
+            assigned_places.add(place)
+        layout["entrance_markers"] = entrances["entrances"]
     return layout
 
 
@@ -115,10 +115,8 @@ def initial_pdf_state(layout):
         state["places"][name] = [marker["row"], marker["col"]]
         state["place_kinds"][name] = marker.get("kind", "建筑")
         state["place_status"][name] = "PDF 图面定位；" + marker["note"]
-    for marker in layout.get("place_entrances", []):
+    for marker in layout.get("entrance_markers", []):
         place = marker["place"]
-        if place in state["entrances"]:
-            continue
         state["entrances"][place] = [{
             "name": marker["name"], "point": list(marker["point"]),
             "enabled": marker["enabled"], "source": "map_inferred",

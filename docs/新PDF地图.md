@@ -35,7 +35,7 @@ A* 以 `f = g + h` 决定扩展顺序。`g` 是起点到当前格的步数，`h`
 
 ## 保存与工作台
 
-`open_pdf_project()` 返回地图资料、服务、保存修订号和地图状态。SQLite 存储于 `data/campuspath-integrated.db`，表结构见 [地图数据库](../database/README.md)。建库或恢复初始地图时读取初始分类、地点和入口资料。每次保存递增内部修订号，导航据此刷新结果。
+`open_pdf_project()` 返回地图资料、服务、保存修订号和地图状态。SQLite 存储于 `data/campuspath-integrated.db`，表结构见 [地图数据库](../database/README.md)。地点标记和可选入口保存在同一张地点表。建库或恢复初始地图时读取初始分类、地点和入口资料。每次保存递增内部修订号，导航据此刷新结果。
 
 界面由 `visualization/workspace.py` 和 `visualization/workspace.css` 管理。左侧操作台在导航、地点、历史和维护间切换，宽度可在 25%～33% 调整，地图位于右侧。默认显示底图和地点名称，“图层与布局”可调整地图尺度、图层和聚焦。地点输入框支持名称筛选，地图点选可回填坐标。
 

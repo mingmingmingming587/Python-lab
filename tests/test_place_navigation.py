@@ -1,6 +1,6 @@
 import unittest
 
-from algorithms.place_navigation import access_points, plan_named_route
+from algorithms.place_navigation import access_point, plan_named_route
 from database.pdf_map import initial_pdf_state, set_place_entrance, set_building_marker
 from tests.test_pdf_map import pdf_fixture
 
@@ -12,9 +12,9 @@ class PlaceNavigationTests(unittest.TestCase):
 
     def test_temporary_access_is_explicit_and_does_not_open_building(self):
         original = [line[:] for line in self.state["grid"]]
-        accesses = access_points(self.state,"起点建筑")
-        self.assertTrue(accesses[0]["temporary"])
-        self.assertEqual(accesses[0]["point"],[2, 5])
+        access = access_point(self.state, "起点建筑")
+        self.assertTrue(access["temporary"])
+        self.assertEqual(access["point"], [2, 5])
         result,start,goal = plan_named_route(self.state,"起点建筑","终点建筑")
         self.assertTrue(result.found)
         self.assertEqual(result.path_length,3)
@@ -37,7 +37,7 @@ class PlaceNavigationTests(unittest.TestCase):
     def test_disabled_or_blocked_entries_do_not_silently_use_temporary_access(self):
         set_place_entrance(self.state,"起点建筑","门",2,2,enabled=False)
         with self.assertRaises(ValueError):
-            access_points(self.state,"起点建筑")
+            access_point(self.state, "起点建筑")
         with self.assertRaises(ValueError):
             set_place_entrance(self.state,"起点建筑","建筑内部不是门",5,5)
 

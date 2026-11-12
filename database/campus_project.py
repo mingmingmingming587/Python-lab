@@ -27,15 +27,19 @@ SCHEMA = (
         kind TEXT,
         row INTEGER NOT NULL CHECK (row >= 0),
         col INTEGER NOT NULL CHECK (col >= 0),
-        status TEXT
-    )""",
-    """CREATE TABLE place_entrances (
-        place_id INTEGER PRIMARY KEY REFERENCES places(id) ON DELETE CASCADE,
-        name TEXT NOT NULL,
-        row INTEGER NOT NULL CHECK (row >= 0),
-        col INTEGER NOT NULL CHECK (col >= 0),
-        enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
-        source TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'map_inferred'))
+        status TEXT,
+        entrance_name TEXT,
+        entrance_row INTEGER CHECK (entrance_row >= 0),
+        entrance_col INTEGER CHECK (entrance_col >= 0),
+        entrance_enabled INTEGER CHECK (entrance_enabled IN (0, 1)),
+        entrance_source TEXT CHECK (entrance_source IN ('manual', 'map_inferred')),
+        CHECK (
+            (entrance_name IS NULL AND entrance_row IS NULL AND entrance_col IS NULL
+             AND entrance_enabled IS NULL AND entrance_source IS NULL)
+            OR
+            (entrance_name IS NOT NULL AND entrance_row IS NOT NULL AND entrance_col IS NOT NULL
+             AND entrance_enabled IS NOT NULL AND entrance_source IS NOT NULL)
+        )
     )""",
     """CREATE TABLE campus_route_history (
         id INTEGER PRIMARY KEY,
@@ -49,7 +53,7 @@ SCHEMA = (
     )""",
 )
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 def _walkability(classes):
@@ -82,7 +86,6 @@ class CampusMapService:
     def _connect(self):
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
         return conn
 
     def _write_map(self, conn, state):
@@ -105,19 +108,22 @@ class CampusMapService:
         for name, (row, col) in state["places"].items():
             if not (0 <= row < rows and 0 <= col < cols):
                 raise ValueError(f"地点坐标超出地图：{name}")
-            cursor = conn.execute("INSERT INTO places (name, kind, row, col, status) VALUES (?, ?, ?, ?, ?)",
-                                  (name, kinds.get(name), row, col, statuses.get(name)))
             entries = entrances.get(name, [])
             if len(entries) > 1:
                 raise ValueError(f"每个地点只能保存一个入口：{name}")
-            for entry in entries:
-                row, col = entry["point"]
-                if not (0 <= row < rows and 0 <= col < cols):
+            entrance_values = (None, None, None, None, None)
+            if entries:
+                entry = entries[0]
+                entrance_row, entrance_col = entry["point"]
+                if not (0 <= entrance_row < rows and 0 <= entrance_col < cols):
                     raise ValueError(f"入口坐标超出地图：{name} / {entry['name']}")
-                conn.execute("""INSERT INTO place_entrances (place_id, name, row, col, enabled, source)
-                                VALUES (?, ?, ?, ?, ?, ?)""",
-                             (cursor.lastrowid, entry["name"], row, col, int(entry.get("enabled", True)),
-                              entry.get("source", "manual")))
+                entrance_values = (entry["name"], entrance_row, entrance_col,
+                                   int(entry.get("enabled", True)), entry.get("source", "manual"))
+            conn.execute("""INSERT INTO places (
+                name, kind, row, col, status, entrance_name, entrance_row, entrance_col,
+                entrance_enabled, entrance_source
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                         (name, kinds.get(name), row, col, statuses.get(name), *entrance_values))
 
     def load(self):
         with closing(self._connect()) as conn, conn:
@@ -147,15 +153,15 @@ class CampusMapService:
                     state["place_kinds"][name] = place["kind"]
                 if place["status"] is not None:
                     state["place_status"][name] = place["status"]
-            for entry in conn.execute("""SELECT p.name AS place_name, e.name, e.row, e.col, e.enabled, e.source
-                FROM place_entrances AS e JOIN places AS p ON e.place_id=p.id
-                ORDER BY p.id"""):
-                entrance = {
-                    "name": entry["name"], "point": [entry["row"], entry["col"]], "enabled": bool(entry["enabled"]),
-                }
-                if entry["source"] == "map_inferred":
-                    entrance["source"] = entry["source"]
-                state["entrances"].setdefault(entry["place_name"], []).append(entrance)
+                if place["entrance_row"] is not None:
+                    entrance = {
+                        "name": place["entrance_name"],
+                        "point": [place["entrance_row"], place["entrance_col"]],
+                        "enabled": bool(place["entrance_enabled"]),
+                    }
+                    if place["entrance_source"] == "map_inferred":
+                        entrance["source"] = place["entrance_source"]
+                    state["entrances"][name] = [entrance]
             return map_row["revision"], state
 
     def save(self, state):

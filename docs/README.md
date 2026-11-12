@@ -1,4 +1,4 @@
 # 项目文档
 
 - [校园地图与数据接口](新PDF地图.md) 介绍地图来源、二维网格、入口、A* 和工作台。
-- [地图数据库](../database/README.md) 说明 SQLite 五张表及保存方式。
+- [地图数据库](../database/README.md) 说明 SQLite 四张表及保存方式。

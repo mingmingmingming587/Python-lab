@@ -28,5 +28,5 @@
 - 地图代码在 `database/pdf_map.py`、`visualization/pdf_map.py` 和 `pages/` 下的四个页面。
 - 建筑标记可位于建筑内部，不修改通行状态；新 PDF 已有 70 个建筑及 19 个场地标记，来源和坐标位于 reference/building-markers.json，入口与地点标记分开维护，缺少入口时使用明确标注待核实的临时接入点。
 - `reference/place-entrances.json` 提供图面候选入口。候选使用 `source="map_inferred"`，保留待核实状态。初始资料在建库或手动恢复时加载，已有数据库读取已保存的地图。
-- 每个地点最多维护一个入口，使用单元素列表保存。A* 对固定接入点计算一次，历史回放使用查询快照。
+- 每个地点可维护一个入口，入口信息与地点保存在同一张表。A* 对固定接入点计算一次，历史回放使用查询快照。
 - `visualization/workspace.py` 和 `visualization/workspace.css` 为共用地图工作台；保留 Streamlit、Plotly、SQLite 和现有 A*。地图选择和撤销只更新草稿，保存地图时在 SQLite 事务中替换整张地图。
