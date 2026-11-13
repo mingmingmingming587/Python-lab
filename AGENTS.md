@@ -9,10 +9,10 @@
 
 ## 分工与接口
 
-- 地图与数据库：`feature/map-management`，主要在 `database/` 和地图管理页面工作。
-- A* 路径规划：`feature/path-planning`，主要在 `algorithms/` 工作。
-- 导航与可视化：`feature/navigation-ui`，主要在 `pages/` 和 `visualization/` 工作。
-- 共同开发基线为 `main`。修改公共数据格式或接口前先查看 `docs/新PDF地图.md`，并在变更时同步更新说明。
+- 地图与数据库：主要在 `database/` 和地图管理页面工作。
+- A* 路径规划：主要在 `algorithms/` 工作。
+- 导航与可视化：主要在 `pages/` 和 `visualization/` 工作。
+- 项目在 `main` 分支维护。修改公共数据格式或接口前先查看 `docs/新PDF地图.md`，并在变更时同步更新说明。
 - 网格使用 `0` 表示可通行、`1` 表示障碍物。当前地图和路径坐标均为二维 `(row, col)`，地图、算法和页面应使用一致的数据。
 
 ## 开发约束
